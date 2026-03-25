@@ -1,0 +1,371 @@
+@inject BugContextCollector Collector
+@inject MultiDestinationDispatcher Dispatcher
+@inject BugSnapOptions Options
+
+@if (Visible)
+{
+    <div class="bs-backdrop" @onclick="HandleBackdropClick">
+        <div class="bs-modal" @onclick:stopPropagation>
+            <div class="bs-modal-header">
+                <span class="bs-modal-title">Reportar bug</span>
+                <button class="bs-close-btn" @onclick="HandleCancel" aria-label="Fechar">&times;</button>
+            </div>
+
+            <div class="bs-modal-body">
+                @if (_rateLimited)
+                {
+                    <div class="bs-alert bs-alert-warning">
+                        Aguarde @_rateLimitSecondsRemaining segundo(s) antes de enviar outro relatório.
+                    </div>
+                }
+
+                @if (_submitSuccess)
+                {
+                    <div class="bs-alert bs-alert-success">
+                        Relatório enviado com sucesso! Obrigado.
+                    </div>
+                }
+
+                @if (_submitError is not null)
+                {
+                    <div class="bs-alert bs-alert-error">
+                        Erro ao enviar: @_submitError
+                    </div>
+                }
+
+                <div class="bs-field">
+                    <label class="bs-label" for="bs-title">Título <span class="bs-required">*</span></label>
+                    <input id="bs-title" class="bs-input" type="text" placeholder="Resumo do problema"
+                           @bind="_title" @bind:event="oninput" maxlength="200" />
+                </div>
+
+                <div class="bs-field">
+                    <label class="bs-label" for="bs-description">Descrição <span class="bs-required">*</span></label>
+                    <textarea id="bs-description" class="bs-textarea" rows="4"
+                              placeholder="O que aconteceu?"
+                              @bind="_description" @bind:event="oninput" maxlength="2000"></textarea>
+                </div>
+
+                <div class="bs-row">
+                    <div class="bs-field bs-field-half">
+                        <label class="bs-label" for="bs-severity">Severidade</label>
+                        <select id="bs-severity" class="bs-select" @bind="_severity">
+                            <option value="@BugSnapSeverity.Low">Baixa</option>
+                            <option value="@BugSnapSeverity.Medium">Média</option>
+                            <option value="@BugSnapSeverity.High">Alta</option>
+                            <option value="@BugSnapSeverity.Critical">Crítica</option>
+                        </select>
+                    </div>
+
+                    <div class="bs-field bs-field-half">
+                        <label class="bs-label" for="bs-category">Categoria</label>
+                        <select id="bs-category" class="bs-select" @bind="_category">
+                            <option value="@BugSnapCategory.UI">UI</option>
+                            <option value="@BugSnapCategory.API">API</option>
+                            <option value="@BugSnapCategory.Auth">Autenticação</option>
+                            <option value="@BugSnapCategory.Performance">Performance</option>
+                            <option value="@BugSnapCategory.SignalR">SignalR</option>
+                            <option value="@BugSnapCategory.Data">Dados</option>
+                            <option value="@BugSnapCategory.Integration">Integração</option>
+                            <option value="@BugSnapCategory.Other">Outro</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="bs-field">
+                    <label class="bs-label">Screenshot (opcional)</label>
+                    <InputFile class="bs-file-input" accept="image/*" OnChange="HandleFileSelected" />
+                    @if (_screenshotFileName is not null)
+                    {
+                        <span class="bs-file-name">&#128247; @_screenshotFileName</span>
+                    }
+                </div>
+
+                <div class="bs-preview">
+                    <button class="bs-preview-toggle" type="button" @onclick="TogglePreview">
+                        &#128203; O que será enviado @(_previewExpanded ? "&#9650;" : "&#9660;")
+                    </button>
+
+                    @if (_previewExpanded && _context is not null)
+                    {
+                        <div class="bs-preview-summary">
+                            <ul class="bs-preview-list">
+                                <li>Tela: <strong>@_context.CurrentRoute</strong></li>
+                                <li>Navegador: <strong>@TruncateBrowserInfo(_context.BrowserInfo)</strong></li>
+                                <li><strong>@_context.RecentRequests.Count</strong> requisições recentes capturadas</li>
+                                <li><strong>@_context.RecentJsErrors.Count</strong> erros JS detectados</li>
+                                @if (_context.CustomContext.Count > 0)
+                                {
+                                    <li><strong>@_context.CustomContext.Count</strong> campos de contexto do app</li>
+                                }
+                                <li>Dados sensíveis mascarados automaticamente</li>
+                            </ul>
+                        </div>
+
+                        <div class="bs-tech-details">
+                            <button class="bs-tech-toggle" type="button" @onclick="ToggleTechDetails">
+                                Ver detalhes técnicos @(_techDetailsExpanded ? "&#9650;" : "&#9660;")
+                            </button>
+
+                            @if (_techDetailsExpanded)
+                            {
+                                <pre class="bs-tech-pre">@GetTechDetails()</pre>
+                            }
+                        </div>
+                    }
+
+                    @if (_context is null && _previewExpanded)
+                    {
+                        <div class="bs-preview-summary">
+                            <span class="bs-loading-text">Coletando contexto...</span>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <div class="bs-modal-footer">
+                <button class="bs-btn bs-btn-secondary" type="button" @onclick="HandleCancel"
+                        disabled="@_submitting">
+                    Cancelar
+                </button>
+                <button class="bs-btn bs-btn-primary" type="button" @onclick="HandleSubmit"
+                        disabled="@(_submitting || _rateLimited || string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_description))">
+                    @if (_submitting)
+                    {
+                        <span>Enviando...</span>
+                    }
+                    else
+                    {
+                        <span>Enviar relatório</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool Visible { get; set; }
+    [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
+    [Parameter] public EventCallback<BugReport> OnReportSubmitted { get; set; }
+
+    private string _title = "";
+    private string _description = "";
+    private BugSnapSeverity _severity = BugSnapSeverity.Medium;
+    private BugSnapCategory _category = BugSnapCategory.Other;
+    private byte[]? _screenshotBytes;
+    private string? _screenshotFileName;
+
+    private BugContextSnapshot? _context;
+    private bool _submitting;
+    private bool _submitSuccess;
+    private string? _submitError;
+    private bool _previewExpanded;
+    private bool _techDetailsExpanded;
+    private bool _rateLimited;
+    private int _rateLimitSecondsRemaining;
+
+    private static DateTime _lastSubmitTime = DateTime.MinValue;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Visible && _context is null)
+        {
+            await LoadContextAsync();
+        }
+
+        if (!Visible)
+        {
+            _previewExpanded = false;
+            _techDetailsExpanded = false;
+        }
+    }
+
+    private async Task LoadContextAsync()
+    {
+        try
+        {
+            _context = await Collector.CollectAsync();
+            if (_context.SuggestedCategory.HasValue)
+                _category = _context.SuggestedCategory.Value;
+        }
+        catch
+        {
+            // Context collection failing should not block the form
+            _context = new BugContextSnapshot();
+        }
+    }
+
+    private async Task HandleFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        const long maxSize = 2 * 1024 * 1024; // 2MB
+        if (file.Size > maxSize) return;
+
+        using var stream = file.OpenReadStream(maxSize);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        _screenshotBytes = ms.ToArray();
+        _screenshotFileName = file.Name;
+    }
+
+    private async Task HandleSubmit()
+    {
+        if (string.IsNullOrWhiteSpace(_title) || string.IsNullOrWhiteSpace(_description))
+            return;
+
+        var secondsSinceLast = (DateTime.UtcNow - _lastSubmitTime).TotalSeconds;
+        if (secondsSinceLast < Options.RateLimitSeconds)
+        {
+            _rateLimited = true;
+            _rateLimitSecondsRemaining = (int)Math.Ceiling(Options.RateLimitSeconds - secondsSinceLast);
+            return;
+        }
+
+        _submitting = true;
+        _submitSuccess = false;
+        _submitError = null;
+        _rateLimited = false;
+
+        try
+        {
+            if (_context is null)
+                _context = await Collector.CollectAsync();
+
+            var report = new BugReport
+            {
+                Title = _title.Trim(),
+                Description = _description.Trim(),
+                Severity = _severity,
+                Category = _category,
+                Screenshot = _screenshotBytes,
+                ScreenshotFileName = _screenshotFileName,
+                Fingerprint = FingerprintGenerator.Generate(_context),
+                Context = _context
+            };
+
+            var results = await Dispatcher.DispatchAsync(report);
+
+            _lastSubmitTime = DateTime.UtcNow;
+
+            var anySuccess = results.Any(r => r.Success);
+            if (anySuccess)
+            {
+                _submitSuccess = true;
+                await OnReportSubmitted.InvokeAsync(report);
+                ResetForm();
+            }
+            else
+            {
+                var errors = results.Where(r => !r.Success).Select(r => r.Error).Where(e => e is not null);
+                _submitError = string.Join("; ", errors);
+                if (string.IsNullOrEmpty(_submitError))
+                    _submitError = "Falha ao enviar para todos os destinos.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _submitError = ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private void HandleCancel()
+    {
+        ResetForm();
+        VisibleChanged.InvokeAsync(false);
+    }
+
+    private void HandleBackdropClick()
+    {
+        if (!_submitting)
+            HandleCancel();
+    }
+
+    private void ResetForm()
+    {
+        _title = "";
+        _description = "";
+        _severity = BugSnapSeverity.Medium;
+        _category = BugSnapCategory.Other;
+        _screenshotBytes = null;
+        _screenshotFileName = null;
+        _context = null;
+        _submitSuccess = false;
+        _submitError = null;
+        _previewExpanded = false;
+        _techDetailsExpanded = false;
+        _rateLimited = false;
+    }
+
+    private async Task TogglePreview()
+    {
+        _previewExpanded = !_previewExpanded;
+        if (_previewExpanded && _context is null)
+            await LoadContextAsync();
+    }
+
+    private void ToggleTechDetails()
+    {
+        _techDetailsExpanded = !_techDetailsExpanded;
+    }
+
+    private static string TruncateBrowserInfo(string info)
+    {
+        if (info.Length <= 60) return info;
+        return info[..57] + "...";
+    }
+
+    private string GetTechDetails()
+    {
+        if (_context is null) return "";
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"Rota: {_context.CurrentRoute}");
+        sb.AppendLine($"Navegador: {_context.BrowserInfo}");
+        sb.AppendLine($"Tela: {_context.ScreenSize}");
+        if (_context.AppName is not null) sb.AppendLine($"App: {_context.AppName} {_context.AppVersion}");
+        if (_context.Environment is not null) sb.AppendLine($"Ambiente: {_context.Environment}");
+        if (_context.TraceId is not null) sb.AppendLine($"TraceId: {_context.TraceId}");
+        if (_context.CorrelationId is not null) sb.AppendLine($"CorrelationId: {_context.CorrelationId}");
+        sb.AppendLine();
+
+        if (_context.RecentRequests.Count > 0)
+        {
+            sb.AppendLine($"=== Requisições recentes ({_context.RecentRequests.Count}) ===");
+            foreach (var req in _context.RecentRequests)
+            {
+                sb.AppendLine($"  {req.Method} {req.Url} → {req.StatusCode} ({req.DurationMs}ms)");
+                if (req.ErrorSnippet is not null)
+                    sb.AppendLine($"    Erro: {req.ErrorSnippet}");
+            }
+            sb.AppendLine();
+        }
+
+        if (_context.RecentJsErrors.Count > 0)
+        {
+            sb.AppendLine($"=== Erros JS ({_context.RecentJsErrors.Count}) ===");
+            foreach (var err in _context.RecentJsErrors)
+            {
+                sb.AppendLine($"  {err.Message}");
+                if (err.Source is not null)
+                    sb.AppendLine($"    em {err.Source}:{err.Line}:{err.Column}");
+            }
+            sb.AppendLine();
+        }
+
+        if (_context.CustomContext.Count > 0)
+        {
+            sb.AppendLine($"=== Contexto do app ({_context.CustomContext.Count} campos) ===");
+            foreach (var kv in _context.CustomContext)
+                sb.AppendLine($"  {kv.Key}: {kv.Value}");
+        }
+
+        return sb.ToString();
+    }
+}

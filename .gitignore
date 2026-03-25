@@ -1,0 +1,41 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.cache
+*.vs/
+.vs/
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Ww][Ii][Nn]32/
+[Bb]uild/
+bld/
+
+## NuGet
+*.nupkg
+*.snupkg
+packages/
+project.lock.json
+
+## IDE
+.idea/
+*.swp
+*~
+.vscode/
+
+## OS
+Thumbs.db
+.DS_Store
+
+## Test results
+TestResults/
+coverage/
+
+## Claude Code
+.claude/
+SPEC.md
