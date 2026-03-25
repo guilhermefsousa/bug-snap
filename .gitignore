@@ -21,6 +21,7 @@ bld/
 *.snupkg
 packages/
 project.lock.json
+nupkg/
 
 ## IDE
 .idea/
