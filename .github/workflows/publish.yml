@@ -18,9 +18,24 @@ jobs:
         with:
           dotnet-version: '9.0.x'
 
-      - name: Generate version from date
+      - name: Get latest tag and increment patch
         id: version
-        run: echo "VERSION=1.0.$(date +%Y%m%d%H%M)" >> $GITHUB_OUTPUT
+        run: |
+          LATEST=$(git tag -l 'v*' --sort=-v:refname | head -1)
+          if [ -z "$LATEST" ]; then
+            VERSION="1.1.0"
+          else
+            # Strip 'v' prefix
+            VER="${LATEST#v}"
+            MAJOR=$(echo $VER | cut -d. -f1)
+            MINOR=$(echo $VER | cut -d. -f2)
+            PATCH=$(echo $VER | cut -d. -f3)
+            PATCH=$((PATCH + 1))
+            VERSION="${MAJOR}.${MINOR}.${PATCH}"
+          fi
+          echo "VERSION=$VERSION" >> $GITHUB_OUTPUT
+          echo "TAG=v$VERSION" >> $GITHUB_OUTPUT
+          echo "Publishing version: $VERSION"
 
       - name: Build
         run: dotnet build src/BugSnap/BugSnap.csproj -c Release -p:Version=${{ steps.version.outputs.VERSION }}
@@ -33,3 +48,10 @@ jobs:
 
       - name: Push to NuGet.org
         run: dotnet nuget push ./nupkg/*.nupkg --api-key ${{ secrets.NUGET_API_KEY }} --source https://api.nuget.org/v3/index.json --skip-duplicate
+
+      - name: Create git tag
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+          git tag ${{ steps.version.outputs.TAG }}
+          git push origin ${{ steps.version.outputs.TAG }}

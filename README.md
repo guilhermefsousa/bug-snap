@@ -1,22 +1,32 @@
 # BugSnap
 
-Structured bug capture library for Blazor apps. Auto-collects context (route, browser, HTTP history, JS errors, correlation IDs), sanitizes sensitive data client-side, shows a preview to the user, and sends to pluggable destinations.
+[![NuGet](https://img.shields.io/nuget/v/BugSnap.svg)](https://www.nuget.org/packages/BugSnap)
+
+Structured bug capture library for Blazor apps. Auto-collects context (route, browser, HTTP history, JS errors, correlation IDs), sanitizes sensitive data client-side, and sends to pluggable destinations.
 
 **BugSnap captures ~85% of the context automatically.** The user only describes what happened.
+
+> **Design principle:** BugSnap is infrastructure — it captures and sends. The UI is your app's responsibility. Each app has its own design system, theme, and components. BugSnap provides the services, your app provides the interface.
+
+---
+
+## Install
+
+```bash
+dotnet add package BugSnap
+```
+
+Or add to your `.csproj`:
+
+```xml
+<PackageReference Include="BugSnap" Version="1.1.*" />
+```
 
 ---
 
 ## Quick Start
 
-### 1. Add the project reference
-
-```xml
-<ProjectReference Include="path/to/BugSnap.csproj" />
-```
-
-> NuGet package coming soon.
-
-### 2. Register services in `Program.cs`
+### 1. Register services in `Program.cs`
 
 ```csharp
 using BugSnap.Extensions;
@@ -31,35 +41,86 @@ builder.Services.AddBugSnap(options =>
 });
 ```
 
-### 3. Wire HTTP tracking into your HttpClient
-
-This is required for BugSnap to capture HTTP request/response history:
+### 2. Wire HTTP tracking into your HttpClient
 
 ```csharp
-using BugSnap.Services;
-
 builder.Services.AddHttpClient("Api", client =>
 {
     client.BaseAddress = new Uri("https://your-api.com");
 })
-.AddHttpMessageHandler(sp => sp.GetRequiredService<HttpActivityTracker>());
+.AddHttpMessageHandler<HttpActivityTracker>();
 ```
 
-### 4. Add the JS reference to `index.html`
+### 3. Add the JS reference to `index.html`
 
 ```html
 <script src="_content/BugSnap/bug-snap.js"></script>
 ```
 
-### 5. Add the button to your layout
+### 4. Build your own UI (recommended)
+
+BugSnap provides services, not UI. Create a dialog in your app's design system:
+
+```razor
+@using BugSnap.Models
+@using BugSnap.Services
+
+@inject BugContextCollector Collector
+@inject MultiDestinationDispatcher Dispatcher
+
+<button @onclick="OpenDialog">Report Bug</button>
+
+@if (_open)
+{
+    <!-- Your modal/dialog component here -->
+    <textarea @bind="_description" placeholder="What happened?" />
+    <button @onclick="Submit">Send</button>
+}
+
+@code {
+    private bool _open;
+    private string _description = "";
+    private BugContextSnapshot? _context;
+
+    private async Task OpenDialog()
+    {
+        _open = true;
+        _context = await Collector.CollectAsync(); // auto-collects everything
+    }
+
+    private async Task Submit()
+    {
+        var report = new BugReport
+        {
+            Title = _description.Length <= 50 ? _description : _description[..50],
+            Description = _description,
+            Severity = _context?.RecentRequests.Any(r => r.StatusCode >= 500) == true
+                ? BugSnapSeverity.High : BugSnapSeverity.Low,
+            Category = _context?.SuggestedCategory ?? BugSnapCategory.Other,
+            Fingerprint = FingerprintGenerator.Generate(_context ?? new()),
+            Context = _context ?? new()
+        };
+
+        var results = await Dispatcher.DispatchAsync(report);
+
+        if (results.Any(r => r.Success))
+        {
+            // Show success toast
+            _open = false;
+        }
+    }
+}
+```
+
+### 5. Or use the built-in components (basic)
+
+BugSnap includes basic components if you don't need custom UI:
 
 ```razor
 @using BugSnap.Components
 
 <BugReportButton />
 ```
-
-That's it. Your users now have a bug report button that auto-collects context, sanitizes sensitive data, shows a preview, and sends to your webhook.
 
 ---
 
@@ -78,34 +139,6 @@ That's it. Your users now have a bug report button that auto-collects context, s
 | `RateLimitSeconds` | `30` | Min seconds between bug reports (prevents spam) |
 | `Destinations` | `[]` | List of destinations to send reports to |
 | `EnableConsoleDestination` | `false` | Log reports to browser console (dev/testing) |
-
-### Full example
-
-```csharp
-builder.Services.AddBugSnap(options =>
-{
-    options.AppName = "Relivox";
-    options.AppVersion = "1.8.4";
-    options.Environment = "Production";
-    options.MaxHttpEntries = 30;
-    options.MaxJsErrors = 15;
-    options.RateLimitSeconds = 60;
-    options.EnableConsoleDestination = true; // dev only
-
-    // Webhook (primary)
-    options.Destinations.Add(new WebhookDestination(
-        "https://your-api.com/bugs",
-        headers: new Dictionary<string, string> { ["X-Api-Key"] = "secret" }
-    ));
-
-    // GitHub Issues
-    options.Destinations.Add(new GitHubIssueDestination(
-        "your-org/your-repo",
-        "ghp_your_token",
-        labels: ["bug", "auto-triage"]
-    ));
-});
-```
 
 ---
 
@@ -129,171 +162,96 @@ new WebhookDestination(
 )
 ```
 
-**Payload:** Full `BugReport` object serialized as JSON (camelCase). Screenshots are base64-encoded.
-
 ### GitHubIssueDestination
 
 Creates a GitHub Issue with structured markdown body.
 
 ```csharp
-// Using "owner/repo" format
-new GitHubIssueDestination("your-org/your-repo", "ghp_your_token")
-
-// With custom labels
 new GitHubIssueDestination("your-org/your-repo", "ghp_your_token",
-    labels: ["bug", "auto-triage", "severity:high"])
-
-// Using separate owner and repo
-new GitHubIssueDestination("your-org", "your-repo", "ghp_your_token")
+    labels: ["bug", "auto-triage"])
 ```
-
-**Requires:** GitHub Personal Access Token with `repo` scope.
-
-The issue body includes: severity, category, user description, environment info, correlation IDs, HTTP activity table, JS errors, and app-specific context.
 
 ### ConsoleDestination
 
-Logs to browser console. For development/testing only.
+Logs to browser console (dev/testing only):
 
 ```csharp
 options.EnableConsoleDestination = true;
 ```
 
-No manual instantiation needed — IJSRuntime is resolved from DI automatically.
-
 ### Custom Destination
 
-Implement `IBugReportDestination`:
-
 ```csharp
-using BugSnap.Destinations;
-using BugSnap.Models;
-
 public class SlackDestination : IBugReportDestination
 {
     public string Name => "Slack";
 
     public async Task<BugReportResult> SubmitAsync(BugReport report, CancellationToken ct = default)
     {
-        // POST to Slack webhook
-        // ...
+        // POST to Slack webhook...
         return new BugReportResult(true, Name);
     }
 }
 ```
 
-Register it:
+### Authenticated Destination (for apps with auth)
+
+If your API requires authentication, create a destination that uses your app's HttpClient:
 
 ```csharp
-options.Destinations.Add(new SlackDestination("https://hooks.slack.com/..."));
-```
-
----
-
-## Components
-
-### BugReportButton
-
-Floating action button that opens the bug report modal.
-
-```razor
-@using BugSnap.Components
-
-@* Bottom-right (default) *@
-<BugReportButton />
-
-@* Other positions *@
-<BugReportButton Position="BugSnapPosition.BottomLeft" />
-<BugReportButton Position="BugSnapPosition.TopRight" />
-<BugReportButton Position="BugSnapPosition.TopLeft" />
-
-@* With label *@
-<BugReportButton Label="Reportar bug" />
-```
-
-### BugReportModal
-
-You can also use the modal directly for custom trigger buttons:
-
-```razor
-@using BugSnap.Components
-
-<button @onclick="() => _showModal = true">Report Bug</button>
-
-<BugReportModal @bind-Visible="_showModal" OnReportSubmitted="HandleReport" />
-
-@code {
-    private bool _showModal;
-
-    private void HandleReport(BugReport report)
+public sealed class AuthenticatedBugReportDestination(IHttpClientFactory factory) : IBugReportDestination
+{
+    private static readonly JsonSerializerOptions _json = new()
     {
-        // optional: do something after successful submit
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter() }
+    };
+
+    public string Name => "Api";
+
+    public async Task<BugReportResult> SubmitAsync(BugReport report, CancellationToken ct = default)
+    {
+        try
+        {
+            var client = factory.CreateClient("YourAuthenticatedClient");
+            var response = await client.PostAsJsonAsync("api/bug-reports", report, _json, ct);
+            response.EnsureSuccessStatusCode();
+            return new BugReportResult(true, Name);
+        }
+        catch (Exception ex)
+        {
+            return new BugReportResult(false, Name, Error: ex.Message);
+        }
     }
 }
-```
 
-### Programmatic Context Collection
-
-Access the collector directly for custom flows:
-
-```razor
-@inject BugSnap.Services.BugContextCollector Collector
-
-@code {
-    private async Task CollectContext()
-    {
-        var snapshot = await Collector.CollectAsync();
-        // snapshot.CurrentRoute, snapshot.RecentRequests, etc.
-    }
-}
+// Register via DI (not in options.Destinations — needs IHttpClientFactory from DI)
+builder.Services.AddScoped<IBugReportDestination, AuthenticatedBugReportDestination>();
 ```
 
 ---
 
 ## App-Specific Context
 
-BugSnap collects generic context automatically (route, browser, HTTP history, JS errors). For domain-specific data, implement `IBugContextProvider`:
+Inject domain-specific data via `IBugContextProvider`:
 
 ```csharp
-using BugSnap.Services;
-
 public class MyAppBugContextProvider : IBugContextProvider
 {
-    private readonly AuthStateProvider _auth;
-    private readonly AppState _state;
-
-    public MyAppBugContextProvider(AuthStateProvider auth, AppState state)
-    {
-        _auth = auth;
-        _state = state;
-    }
-
     public Task<IDictionary<string, string>> GetCustomContextAsync(CancellationToken ct = default)
     {
-        var ctx = new Dictionary<string, string>
+        return Task.FromResult<IDictionary<string, string>>(new Dictionary<string, string>
         {
-            ["UserId"] = _auth.UserId?.ToString() ?? "",
-            ["Role"] = _auth.Role ?? "",
-            ["TenantId"] = _auth.TenantId?.ToString() ?? "",
-            ["ActiveModule"] = _state.CurrentModule ?? "",
-            ["SelectedItemId"] = _state.SelectedId?.ToString() ?? "",
-        };
-        return Task.FromResult<IDictionary<string, string>>(ctx);
+            ["UserId"] = "...",
+            ["TenantId"] = "...",
+            ["ActiveModule"] = "...",
+        });
     }
 }
-```
 
-Register it **after** `AddBugSnap()`:
-
-```csharp
-builder.Services.AddBugSnap(options => { ... });
+// Register after AddBugSnap()
 builder.Services.AddScoped<IBugContextProvider, MyAppBugContextProvider>();
 ```
-
-The custom context appears in:
-- The preview panel (under "campos de contexto do app")
-- The webhook JSON payload (in `context.customContext`)
-- The GitHub Issue body (under "App Context" table)
 
 ---
 
@@ -301,186 +259,67 @@ The custom context appears in:
 
 BugSnap generates a fingerprint hash for each report, enabling backend deduplication. The fingerprint is a 16-character hex string (SHA256) based on:
 
-- **Normalized route** — query params stripped, trailing slashes removed, GUIDs/numeric IDs replaced with `{id}`
-- **Error signature** — first JS error message (truncated, normalized) OR first HTTP error (status + normalized URL)
+- **Normalized route** — query params stripped, GUIDs/numeric IDs replaced with `{id}`
+- **Error signature** — first JS error message (truncated) OR first HTTP error (status + normalized URL)
 - **App version**
 
-Same bug, same route, same error class = same fingerprint — regardless of entity IDs in the URL.
-
-The fingerprint is included in the payload as `fingerprint`:
-
-```json
-{
-  "fingerprint": "a1b2c3d4e5f6a7b8",
-  "title": "...",
-  "context": { ... }
-}
+```csharp
+var fingerprint = FingerprintGenerator.Generate(context);
+// "a1b2c3d4e5f6a7b8"
 ```
 
-Your backend can use it for:
-- Counting occurrences of the same bug
-- Suppressing duplicate reports
-- Tracking regression across versions
+Same bug, same route, same error class = same fingerprint — regardless of entity IDs in the URL.
 
 ---
 
 ## Category Auto-Suggestion
 
-BugSnap automatically suggests a bug category based on collected evidence. The suggestion pre-selects the category dropdown in the modal, but the user can always override it.
-
-**Heuristic rules (in priority order):**
+BugSnap suggests a bug category based on collected evidence:
 
 | Priority | Condition | Category |
 |----------|-----------|----------|
-| 1 | HTTP 401/403 in recent requests | Auth |
-| 2 | HTTP 5xx in recent requests | API |
-| 3 | SignalR state is Disconnected/Failed | SignalR |
+| 1 | HTTP 401/403 | Auth |
+| 2 | HTTP 5xx | API |
+| 3 | SignalR disconnected | SignalR |
 | 4 | JS errors present | UI |
-| 5 | HTTP 4xx in recent requests | API |
-| 6 | Requests slower than 3 seconds | Performance |
+| 5 | HTTP 4xx | API |
+| 6 | Requests > 3 seconds | Performance |
 | 7 | None of the above | Other |
 
-The suggested category is also included in the context snapshot as `suggestedCategory` for backend analysis.
+The suggestion is available in `context.SuggestedCategory` after calling `CollectAsync()`.
 
 ---
 
 ## What Gets Captured Automatically
 
-| Data | Source | Always |
-|------|--------|--------|
-| Current route | `NavigationManager.Uri` | Yes |
-| Browser / OS | `navigator.userAgent` via JS | Yes |
-| Screen size | `window.innerWidth x innerHeight` | Yes |
-| Recent HTTP requests | `HttpActivityTracker` DelegatingHandler | Yes* |
-| HTTP error snippets | Response body (first 500 chars, sanitized) | On 4xx/5xx |
-| Failed requests (network errors) | Exception type + message | On failure |
-| TraceId | `traceparent` or `X-Trace-Id` response header | If present |
-| CorrelationId | `X-Correlation-Id` or `X-Request-Id` response header | If present |
-| JS errors | `window.error` + `unhandledrejection` events | Yes |
-| App name / version / env | `BugSnapOptions` config | If configured |
-| Custom context | `IBugContextProvider` implementation | If registered |
-
-*\* Requires wiring `HttpActivityTracker` into your HttpClient pipeline (see Quick Start step 3).*
+| Data | Source |
+|------|--------|
+| Current route | `NavigationManager.Uri` |
+| Browser / OS | `navigator.userAgent` |
+| Screen size | `window.innerWidth x innerHeight` |
+| Recent HTTP requests (last 20) | `HttpActivityTracker` DelegatingHandler |
+| HTTP error snippets (first 500 chars) | Response body on 4xx/5xx |
+| Failed requests (network errors) | Exception type + message |
+| TraceId | `traceparent` or `X-Trace-Id` response header |
+| CorrelationId | `X-Correlation-Id` or `X-Request-Id` response header |
+| JS errors | `window.error` + `unhandledrejection` events |
+| App name / version / env | `BugSnapOptions` config |
+| Custom context | `IBugContextProvider` implementation |
 
 ---
 
 ## Sanitization
 
-BugSnap sanitizes sensitive data **before** it leaves the browser. This is not optional.
-
-### What gets masked
+BugSnap sanitizes sensitive data **before** it leaves the browser. Not optional.
 
 | Pattern | Action |
 |---------|--------|
-| `Authorization: Bearer xxx` in error snippets | `Bearer [REDACTED]` |
-| `Authorization: Basic xxx` in error snippets | `Basic [REDACTED]` |
-| `Authorization: xxx` (non-Bearer/Basic) in error snippets | `Authorization: [REDACTED]` |
-| `Cookie: xxx` / `Set-Cookie: xxx` in error snippets | `Cookie: [REDACTED]` |
-| `X-Api-Key: xxx` / `X-Token: xxx` in error snippets | `X-Api-Key: [REDACTED]` |
-| `?token=xxx`, `?key=xxx`, `?api_key=xxx`, `?access_token=xxx`, `?secret=xxx` in URLs | `?token=[REDACTED]` |
-
-### What gets truncated
-
-| Target | Limit |
-|--------|-------|
-| Error response snippets | `MaxErrorSnippetLength` (default: 500 chars) |
-| Total payload | 1MB max (screenshot included) |
-
-### Preview
-
-The modal shows a human-readable preview before sending:
-
-```
-O que sera enviado:
-- Tela: /inbox/conversations/abc-123
-- Navegador: Chrome 120 / Windows
-- 3 requisicoes recentes capturadas
-- 1 erros JS detectados
-- 5 campos de contexto do app
-- Dados sensiveis mascarados automaticamente
-
-[Ver detalhes tecnicos]
-```
-
-Users can expand "Ver detalhes tecnicos" to see the full sanitized payload.
-
----
-
-## Payload Schema
-
-The webhook receives a JSON payload with this structure:
-
-```json
-{
-  "schemaVersion": "1.0.0",
-  "sdkVersion": "",
-  "title": "Mensagem nao envia",
-  "description": "Clico em enviar e nada acontece",
-  "severity": "High",
-  "category": "API",
-  "screenshotFileName": "screenshot.png",
-  "screenshot": "base64...",
-  "context": {
-    "currentRoute": "/inbox/conversations/abc-123",
-    "browserInfo": "Mozilla/5.0 ...",
-    "screenSize": "1920x1080",
-    "signalRState": null,
-    "appName": "MyApp",
-    "appVersion": "1.0.0",
-    "environment": "Production",
-    "collectedAtUtc": "2026-03-25T14:32:01Z",
-    "traceId": "abc123",
-    "correlationId": "def456",
-    "sessionId": null,
-    "pageInstanceId": "a1b2c3d4",
-    "recentRequests": [
-      {
-        "method": "POST",
-        "url": "https://api.example.com/api/inbox/send",
-        "statusCode": 500,
-        "durationMs": 234,
-        "timestampUtc": "2026-03-25T14:32:01Z",
-        "errorSnippet": "NullReferenceException: Object reference...",
-        "traceId": "abc123",
-        "correlationId": "def456"
-      }
-    ],
-    "recentJsErrors": [
-      {
-        "message": "TypeError: Cannot read property 'id' of null",
-        "source": "https://app.example.com/_framework/blazor.webassembly.js",
-        "line": 142,
-        "column": 15,
-        "timestampUtc": "2026-03-25T14:31:59Z"
-      }
-    ],
-    "customContext": {
-      "TenantId": "tenant-abc",
-      "UserId": "user-123",
-      "ActiveConnectionId": "conn-xyz"
-    }
-  },
-  "reportId": "a1b2c3d4e5f6",
-  "createdAtUtc": "2026-03-25T14:32:05Z"
-}
-```
-
----
-
-## CSS Customization
-
-BugSnap uses CSS variables. Override them to match your app's theme:
-
-```css
-:root {
-    --bugsnap-primary: #0F8B95;
-    --bugsnap-primary-hover: #0d7a83;
-    --bugsnap-bg: #ffffff;
-    --bugsnap-text: #1e293b;
-    --bugsnap-border: #e2e8f0;
-    --bugsnap-radius: 8px;
-}
-```
+| `Authorization: Bearer xxx` | `Bearer [REDACTED]` |
+| `Authorization: Basic xxx` | `Basic [REDACTED]` |
+| `Cookie: xxx` / `Set-Cookie: xxx` | `Cookie: [REDACTED]` |
+| `X-Api-Key: xxx` / `X-Token: xxx` | `X-Api-Key: [REDACTED]` |
+| `?token=xxx`, `?key=xxx`, `?api_key=xxx` | `?token=[REDACTED]` |
+| Error snippets | Truncated to 500 chars |
 
 ---
 
@@ -489,29 +328,32 @@ BugSnap uses CSS variables. Override them to match your app's theme:
 ```
 Your Blazor App
     |
-    +-- BugReportButton / BugReportModal
+    +-- Your custom UI (dialog/modal/button)
     |       |
     |       +-- BugContextCollector
     |       |       |
-    |       |       +-- HttpActivityTracker (ring buffer of last 20 requests)
+    |       |       +-- HttpActivityBuffer (singleton — ring buffer of last 20 requests)
+    |       |       +-- HttpActivityTracker (transient — DelegatingHandler in HttpClient pipeline)
     |       |       +-- JsErrorCollector (JS interop: errors, browser, screen)
     |       |       +-- IBugContextProvider (your app-specific context)
+    |       |       +-- CategorySuggester (auto-suggests category from context)
     |       |
+    |       +-- FingerprintGenerator (SHA256 hash for dedup)
     |       +-- PayloadSanitizer (masks tokens/headers before send)
     |       |
     |       +-- MultiDestinationDispatcher
     |               |
-    |               +-- WebhookDestination (POST JSON)
-    |               +-- GitHubIssueDestination (creates Issue)
-    |               +-- ConsoleDestination (browser console)
-    |               +-- YourCustomDestination
+    |               +-- WebhookDestination
+    |               +-- GitHubIssueDestination
+    |               +-- ConsoleDestination
+    |               +-- Your custom destination
 ```
 
 ---
 
 ## Requirements
 
-- .NET 9
+- .NET 9+
 - Blazor WebAssembly or Blazor Server
 - No external JS dependencies
 - No NuGet dependencies beyond `Microsoft.AspNetCore.Components.Web`
