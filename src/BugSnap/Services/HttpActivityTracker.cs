@@ -5,11 +5,11 @@ namespace BugSnap.Services;
 
 public sealed class HttpActivityTracker : DelegatingHandler
 {
-    private readonly RingBuffer<HttpActivityEntry> _buffer;
+    private readonly HttpActivityBuffer _buffer;
 
-    public HttpActivityTracker(int capacity = 20)
+    public HttpActivityTracker(HttpActivityBuffer buffer)
     {
-        _buffer = new RingBuffer<HttpActivityEntry>(capacity);
+        _buffer = buffer;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -76,8 +76,6 @@ public sealed class HttpActivityTracker : DelegatingHandler
 
         return response;
     }
-
-    public IReadOnlyList<HttpActivityEntry> GetRecentActivity() => _buffer.ToList();
 
     private static string BuildSafeUrl(Uri? uri)
     {

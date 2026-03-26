@@ -1,6 +1,6 @@
 <div class="bs-fab-wrapper bs-fab-@Position.ToString().ToLower()">
     <button class="bs-fab" @onclick="ToggleModal" aria-label="Reportar bug" title="Reportar bug">
-        <span class="bs-fab-icon">&#128027;</span>
+        <span class="bs-fab-icon">🐛</span>
         @if (!string.IsNullOrEmpty(Label))
         {
             <span class="bs-fab-label">@Label</span>
@@ -11,7 +11,7 @@
 <BugReportModal @bind-Visible="_modalVisible" />
 
 @code {
-    [Parameter] public BugSnapPosition Position { get; set; } = BugSnapPosition.BottomRight;
+    [Parameter] public BugSnapPosition Position { get; set; } = BugSnapPosition.BottomLeft;
     [Parameter] public string? Label { get; set; }
 
     private bool _modalVisible;

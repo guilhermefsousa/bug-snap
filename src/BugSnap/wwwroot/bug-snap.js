@@ -31,5 +31,22 @@ window.__bugSnap = {
     getBrowserInfo() { return navigator.userAgent; },
     getScreenSize() { return window.innerWidth + 'x' + window.innerHeight; },
 
-    log(message) { console.log('%c[BugSnap]%c ' + message, 'color: #0F8B95; font-weight: bold', 'color: inherit'); }
+    log(message) { console.log('%c[BugSnap]%c ' + message, 'color: #0F8B95; font-weight: bold', 'color: inherit'); },
+
+    initPasteHandler(textareaElement, dotNetHelper) {
+        textareaElement.addEventListener('paste', async (e) => {
+            const items = e.clipboardData?.items;
+            if (!items) return;
+            for (const item of items) {
+                if (item.type.startsWith('image/')) {
+                    e.preventDefault();
+                    const blob = item.getAsFile();
+                    const buffer = await blob.arrayBuffer();
+                    const bytes = Array.from(new Uint8Array(buffer));
+                    await dotNetHelper.invokeMethodAsync('OnImagePasted', bytes, blob.name || 'screenshot.png');
+                    return;
+                }
+            }
+        });
+    }
 };

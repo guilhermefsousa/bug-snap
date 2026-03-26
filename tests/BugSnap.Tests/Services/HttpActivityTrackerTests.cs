@@ -14,10 +14,11 @@ public class HttpActivityTrackerTests
             => Task.FromResult(Response);
     }
 
-    private static HttpClient BuildClient(HttpActivityTracker tracker, TestHandler inner)
+    private static (HttpClient client, HttpActivityBuffer buffer) BuildClient(int capacity, TestHandler inner)
     {
-        tracker.InnerHandler = inner;
-        return new HttpClient(tracker);
+        var buffer = new HttpActivityBuffer(capacity);
+        var tracker = new HttpActivityTracker(buffer) { InnerHandler = inner };
+        return (new HttpClient(tracker), buffer);
     }
 
     // --- Captures successful request ---
@@ -27,14 +28,13 @@ public class HttpActivityTrackerTests
     {
         // Arrange
         var inner = new TestHandler { Response = new HttpResponseMessage(HttpStatusCode.OK) };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/users");
 
         // Assert
-        var entries = tracker.GetRecentActivity();
+        var entries = buffer.GetRecentActivity();
         Assert.Single(entries);
         Assert.Equal("GET", entries[0].Method);
         Assert.Equal("https://example.com/api/users", entries[0].Url);
@@ -46,14 +46,13 @@ public class HttpActivityTrackerTests
     {
         // Arrange
         var inner = new TestHandler { Response = new HttpResponseMessage(HttpStatusCode.OK) };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/ping");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.True(entry.DurationMs >= 0); // Stopwatch may read 0 on fast machines but never negative
     }
 
@@ -68,14 +67,13 @@ public class HttpActivityTrackerTests
             Content = new StringContent("Validation error")
         };
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/items");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal(400, entry.StatusCode);
         Assert.Equal("Validation error", entry.ErrorSnippet);
     }
@@ -89,14 +87,13 @@ public class HttpActivityTrackerTests
             Content = new StringContent("Server exploded")
         };
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/process");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal(500, entry.StatusCode);
         Assert.Equal("Server exploded", entry.ErrorSnippet);
     }
@@ -110,14 +107,13 @@ public class HttpActivityTrackerTests
             Content = new StringContent("all good")
         };
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/ok");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Null(entry.ErrorSnippet);
     }
 
@@ -133,14 +129,13 @@ public class HttpActivityTrackerTests
             Content = new StringContent(longBody)
         };
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/long-error");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal(500, entry.ErrorSnippet!.Length);
     }
 
@@ -153,14 +148,13 @@ public class HttpActivityTrackerTests
         var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.Add("traceparent", "00-abc123traceId000000000000000000-def456-01");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/trace");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("abc123traceId000000000000000000", entry.TraceId);
     }
 
@@ -171,14 +165,13 @@ public class HttpActivityTrackerTests
         var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.Add("X-Trace-Id", "trace-xyz-789");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/trace");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("trace-xyz-789", entry.TraceId);
     }
 
@@ -190,14 +183,13 @@ public class HttpActivityTrackerTests
         response.Headers.Add("traceparent", "00-primary000000000000000000000000-parent-01");
         response.Headers.Add("X-Trace-Id", "fallback");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/both-headers");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("primary000000000000000000000000", entry.TraceId);
     }
 
@@ -210,14 +202,13 @@ public class HttpActivityTrackerTests
         var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.Add("X-Correlation-Id", "corr-abc-123");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/corr");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("corr-abc-123", entry.CorrelationId);
     }
 
@@ -228,14 +219,13 @@ public class HttpActivityTrackerTests
         var response = new HttpResponseMessage(HttpStatusCode.OK);
         response.Headers.Add("X-Request-Id", "req-id-456");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/reqid");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("req-id-456", entry.CorrelationId);
     }
 
@@ -247,14 +237,13 @@ public class HttpActivityTrackerTests
         response.Headers.Add("X-Correlation-Id", "preferred-corr");
         response.Headers.Add("X-Request-Id", "fallback-req");
         var inner = new TestHandler { Response = response };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/both-corr");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("preferred-corr", entry.CorrelationId);
     }
 
@@ -265,14 +254,13 @@ public class HttpActivityTrackerTests
     {
         // Arrange
         var inner = new TestHandler { Response = new HttpResponseMessage(HttpStatusCode.OK) };
-        var tracker = new HttpActivityTracker(capacity: 10);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(10, inner);
 
         // Act
         await client.GetAsync("https://example.com/api/search?q=secret&page=1");
 
         // Assert
-        var entry = tracker.GetRecentActivity()[0];
+        var entry = buffer.GetRecentActivity()[0];
         Assert.Equal("https://example.com/api/search", entry.Url);
         Assert.DoesNotContain("secret", entry.Url);
     }
@@ -284,8 +272,7 @@ public class HttpActivityTrackerTests
     {
         // Arrange
         var inner = new TestHandler();
-        var tracker = new HttpActivityTracker(capacity: 3);
-        var client = BuildClient(tracker, inner);
+        var (client, buffer) = BuildClient(3, inner);
 
         // Act — send 5 requests, capacity is 3
         for (int i = 1; i <= 5; i++)
@@ -298,7 +285,7 @@ public class HttpActivityTrackerTests
         }
 
         // Assert — only the last 3 are kept
-        var entries = tracker.GetRecentActivity();
+        var entries = buffer.GetRecentActivity();
         Assert.Equal(3, entries.Count);
         Assert.Equal("https://example.com/api/item/3", entries[0].Url);
         Assert.Equal("https://example.com/api/item/4", entries[1].Url);

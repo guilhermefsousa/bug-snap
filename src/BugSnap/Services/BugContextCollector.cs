@@ -6,7 +6,7 @@ namespace BugSnap.Services;
 public sealed class BugContextCollector(
     NavigationManager navigation,
     JsErrorCollector jsErrorCollector,
-    HttpActivityTracker httpTracker,
+    HttpActivityBuffer httpBuffer,
     IBugContextProvider contextProvider,
     BugSnapOptions options)
 {
@@ -20,7 +20,7 @@ public sealed class BugContextCollector(
         var jsErrors = await jsErrorCollector.GetErrorsAsync();
         var customContext = await contextProvider.GetCustomContextAsync(ct);
 
-        var recentRequests = httpTracker.GetRecentActivity();
+        var recentRequests = httpBuffer.GetRecentActivity();
 
         // Most recent TraceId and CorrelationId from HTTP entries
         string? traceId = null;

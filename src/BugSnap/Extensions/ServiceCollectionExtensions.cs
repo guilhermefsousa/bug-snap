@@ -26,7 +26,8 @@ public static class ServiceCollectionExtensions
         services.AddSingleton(options);
 
         // Core services
-        services.AddSingleton(new HttpActivityTracker(options.MaxHttpEntries));
+        services.AddSingleton(new HttpActivityBuffer(options.MaxHttpEntries));
+        services.AddTransient<HttpActivityTracker>();
         services.AddScoped<JsErrorCollector>();
         services.AddScoped<BugContextCollector>();
         services.AddScoped<MultiDestinationDispatcher>();
