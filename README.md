@@ -353,7 +353,7 @@ Your Blazor App
 
 ## Requirements
 
-- .NET 9+
+- .NET 10+
 - Blazor WebAssembly or Blazor Server
 - No external JS dependencies
 - No NuGet dependencies beyond `Microsoft.AspNetCore.Components.Web`
