@@ -8,7 +8,7 @@ Blazor Razor Class Library (RCL) for structured bug reporting. Auto-captures con
 
 ## Stack
 
-- .NET 9, Razor Class Library
+- .NET 10, Razor Class Library
 - Blazor WebAssembly (primary target, also works with Blazor Server)
 - System.Text.Json (no extra NuGet dependencies in core)
 - Vanilla JS for interop (no external JS libs)
