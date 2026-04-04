@@ -154,9 +154,18 @@
             if (_context is null)
                 _context = await Collector.CollectAsync();
 
-            var title = _description.Trim().Length > 50
-                ? _description.Trim()[..50]
-                : _description.Trim();
+            var maxLen = 255;
+            var raw = _description.Trim();
+            string title;
+            if (raw.Length > maxLen)
+            {
+                var cut = raw.LastIndexOf(' ', maxLen);
+                title = cut > 20 ? raw[..cut] + "..." : raw[..maxLen] + "...";
+            }
+            else
+            {
+                title = raw;
+            }
             if (string.IsNullOrEmpty(title)) title = "Bug report";
 
             var severity = DetectSeverity(_context);
