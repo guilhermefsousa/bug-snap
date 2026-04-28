@@ -7,4 +7,5 @@ public class JsErrorEntry
     public int? Line { get; set; }
     public int? Column { get; set; }
     public DateTime TimestampUtc { get; set; }
+    public string? StackTrace { get; set; }
 }

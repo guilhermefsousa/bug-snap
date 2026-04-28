@@ -1,0 +1,43 @@
+@inherits ErrorBoundary
+
+@if (CurrentException is null)
+{
+    @ChildContent
+}
+else if (ErrorContent is not null)
+{
+    @ErrorContent(CurrentException)
+}
+
+@code {
+    [Inject] private AutoCaptureService? AutoCapture { get; set; }
+    [Inject] private JsErrorCollector? JsErrorCollector { get; set; }
+    [Inject] private BugSnapOptions? BugSnapOpts { get; set; }
+    [Inject] private IServiceProvider? ServiceProvider { get; set; }
+
+    private bool _autoCaptureRegistered;
+
+    protected override async Task OnErrorAsync(Exception exception)
+    {
+        if (AutoCapture is not null)
+        {
+            try { await AutoCapture.ReportAsync(exception, null, "blazor", CancellationToken.None); }
+            catch { }
+        }
+        await base.OnErrorAsync(exception);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Register JS auto-capture hook once on first render, if enabled.
+        // BugSnapErrorBoundary in App.razor handles JS hook registration for the whole app.
+        if (firstRender && !_autoCaptureRegistered && BugSnapOpts?.EnableAutoCapture == true
+            && JsErrorCollector is not null && ServiceProvider is not null)
+        {
+            _autoCaptureRegistered = true;
+            try { await JsErrorCollector.RegisterAutoCaptureCallbackAsync(ServiceProvider); }
+            catch { }
+        }
+        await base.OnAfterRenderAsync(firstRender);
+    }
+}

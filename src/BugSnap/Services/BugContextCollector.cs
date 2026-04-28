@@ -3,14 +3,14 @@ using Microsoft.AspNetCore.Components;
 
 namespace BugSnap.Services;
 
-public sealed class BugContextCollector(
+public class BugContextCollector(
     NavigationManager navigation,
     JsErrorCollector jsErrorCollector,
     HttpActivityBuffer httpBuffer,
     IBugContextProvider contextProvider,
     BugSnapOptions options)
 {
-    public async Task<BugContextSnapshot> CollectAsync(CancellationToken ct = default)
+    public virtual async Task<BugContextSnapshot> CollectAsync(CancellationToken ct = default)
     {
         var uri = new Uri(navigation.Uri);
         var currentRoute = uri.PathAndQuery;

@@ -48,6 +48,12 @@ public static class ServiceCollectionExtensions
                 new ConsoleDestination(() => sp.GetRequiredService<IJSRuntime>()));
         }
 
+        // Auto-capture services — registered always so [Inject] nullable properties resolve.
+        // EnableAutoCapture guards actual dispatch at runtime (OnErrorAsync / JS hook).
+        services.AddSingleton<AutoCaptureThrottle>();
+        services.AddScoped<AutoCaptureService>();
+        services.TryAddScoped<IAutoCaptureTelemetry, NoOpAutoCaptureTelemetry>();
+
         return services;
     }
 }

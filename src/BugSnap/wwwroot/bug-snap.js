@@ -1,29 +1,44 @@
 window.__bugSnap = {
     errors: [],
     maxErrors: 10,
+    _autoCaptureHelper: null,
 
     init(maxErrors) {
         this.maxErrors = maxErrors || 10;
         window.addEventListener('error', (e) => {
-            this.errors.push({
+            const entry = {
                 message: e.message || 'Unknown error',
                 source: e.filename || null,
                 line: e.lineno || null,
                 column: e.colno || null,
+                stackTrace: e.error?.stack || null,
                 timestamp: new Date().toISOString()
-            });
+            };
+            this.errors.push(entry);
             if (this.errors.length > this.maxErrors) this.errors.shift();
+            if (this._autoCaptureHelper) {
+                this._autoCaptureHelper.invokeMethodAsync('OnJsError', entry).catch(() => {});
+            }
         });
         window.addEventListener('unhandledrejection', (e) => {
-            this.errors.push({
+            const entry = {
                 message: e.reason?.message || String(e.reason) || 'Unhandled rejection',
                 source: 'unhandledrejection',
                 line: null,
                 column: null,
+                stackTrace: e.reason?.stack || null,
                 timestamp: new Date().toISOString()
-            });
+            };
+            this.errors.push(entry);
             if (this.errors.length > this.maxErrors) this.errors.shift();
+            if (this._autoCaptureHelper) {
+                this._autoCaptureHelper.invokeMethodAsync('OnJsError', entry).catch(() => {});
+            }
         });
+    },
+
+    initAutoCapture(dotNetHelper) {
+        this._autoCaptureHelper = dotNetHelper;
     },
 
     getErrors() { return JSON.parse(JSON.stringify(this.errors)); },

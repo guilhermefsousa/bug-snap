@@ -215,4 +215,91 @@ public class PayloadSanitizerTests
         Assert.Equal(0, result.SnippetsTruncated);
         Assert.Equal(0, result.HeaderPatternsMasked);
     }
+
+    // --- JS error sanitization ---
+
+    [Fact]
+    public void Sanitize_WhenStackTraceContainsBearer_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var jsError = new JsErrorEntry
+        {
+            Message = "auth error",
+            StackTrace = "Error at fetch: headers: Bearer eyJhbGciOiJIUzI1NiJ9.abc.def\n  at api.js:42"
+        };
+        report.Context.RecentJsErrors = [jsError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED]", jsError.StackTrace);
+        Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9.abc.def", jsError.StackTrace);
+    }
+
+    [Fact]
+    public void Sanitize_WhenJsErrorMessageContainsEmail_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var jsError = new JsErrorEntry
+        {
+            Message = "Failed to notify user@example.com about error"
+        };
+        report.Context.RecentJsErrors = [jsError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED_EMAIL]", jsError.Message);
+        Assert.DoesNotContain("user@example.com", jsError.Message);
+    }
+
+    [Fact]
+    public void Sanitize_WhenJsErrorSourceContainsToken_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport
+        {
+            Context = new BugContextSnapshot
+            {
+                RecentJsErrors = new List<JsErrorEntry>
+                {
+                    new() { Source = "https://app.com/Bearer abc123def456 callback" }
+                }
+            }
+        };
+        var options = new BugSnapOptions { MaxErrorSnippetLength = 500 };
+
+        // Act
+        PayloadSanitizer.Sanitize(report, options);
+
+        // Assert
+        Assert.Contains("[REDACTED]", report.Context.RecentJsErrors[0].Source);
+        Assert.DoesNotContain("abc123def456", report.Context.RecentJsErrors[0].Source);
+    }
+
+    [Fact]
+    public void Sanitize_WhenStackTraceExceedsMaxLength_ShouldTruncateAfterRedaction()
+    {
+        // Arrange
+        const int maxLength = 50;
+        var options = DefaultOptions(maxSnippetLength: maxLength);
+        var report = new BugReport();
+        var jsError = new JsErrorEntry
+        {
+            // Short safe prefix + long safe suffix — redaction won't change length,
+            // truncation should kick in
+            StackTrace = "Error: safe message\n" + new string('x', 200)
+        };
+        report.Context.RecentJsErrors = [jsError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, options);
+
+        // Assert
+        Assert.Equal(maxLength, jsError.StackTrace!.Length);
+    }
 }

@@ -20,4 +20,29 @@ public sealed class BugSnapOptions
     /// IJSRuntime is resolved from DI automatically. For dev/testing only.
     /// </summary>
     public bool EnableConsoleDestination { get; set; }
+
+    /// <summary>
+    /// When true, registers auto-capture services that silently report Blazor and JS errors.
+    /// </summary>
+    public bool EnableAutoCapture { get; set; } = false;
+
+    /// <summary>
+    /// Minimum seconds between submissions of the same fingerprint.
+    /// </summary>
+    public int AutoCaptureFingerprintThrottleSeconds { get; set; } = 300;
+
+    /// <summary>
+    /// Maximum number of auto-capture submissions allowed per minute globally.
+    /// </summary>
+    public int AutoCaptureGlobalRateLimitPerMinute { get; set; } = 5;
+
+    /// <summary>
+    /// Number of submissions per minute that trips the circuit breaker.
+    /// </summary>
+    public int AutoCaptureCircuitBreakerThreshold { get; set; } = 20;
+
+    /// <summary>
+    /// Seconds the circuit breaker stays open after being tripped.
+    /// </summary>
+    public int AutoCaptureCircuitBreakerCooldownSeconds { get; set; } = 300;
 }

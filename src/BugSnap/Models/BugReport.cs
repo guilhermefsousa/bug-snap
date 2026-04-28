@@ -14,4 +14,5 @@ public class BugReport
     public string ReportId { get; set; } = Guid.NewGuid().ToString("N");
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string? Fingerprint { get; set; }
+    public bool AutoDetected { get; set; } = false;
 }

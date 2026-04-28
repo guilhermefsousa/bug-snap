@@ -25,6 +25,13 @@ public static class PayloadSanitizer
     private static readonly Regex _apiKeyHeaderRegex =
         new(@"(?:X-Api-Key|X-Token)[""']?\s*[:=]\s*\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
+    private static readonly Regex _emailRegex =
+        new(@"\b[\w.+-]+@[\w.-]+\.\w{2,}\b", RegexOptions.Compiled);
+
+    // Brazilian phone numbers: 10-13 digits (optionally with +55 prefix covered by digit range)
+    private static readonly Regex _phoneRegex =
+        new(@"\b\d{10,13}\b", RegexOptions.Compiled);
+
     public static SanitizationResult Sanitize(BugReport report, BugSnapOptions options)
     {
         int headerPatternsMasked = 0;
@@ -39,7 +46,48 @@ public static class PayloadSanitizer
             snippetsTruncated += truncated;
         }
 
+        // Sanitize JS errors (message, stackTrace, source)
+        foreach (var jsError in report.Context.RecentJsErrors)
+        {
+            SanitizeJsError(jsError, options.MaxErrorSnippetLength);
+        }
+
         return new SanitizationResult(headerPatternsMasked, queryParamsMasked, snippetsTruncated);
+    }
+
+    private static void SanitizeJsError(JsErrorEntry entry, int maxLength)
+    {
+        if (!string.IsNullOrEmpty(entry.Message))
+        {
+            int dummy = 0;
+            entry.Message = RedactSensitive(entry.Message, ref dummy);
+            if (entry.Message.Length > maxLength)
+                entry.Message = entry.Message[..maxLength];
+        }
+
+        if (!string.IsNullOrEmpty(entry.StackTrace))
+        {
+            int dummy = 0;
+            entry.StackTrace = RedactSensitive(entry.StackTrace, ref dummy);
+            if (entry.StackTrace.Length > maxLength)
+                entry.StackTrace = entry.StackTrace[..maxLength];
+        }
+
+        if (!string.IsNullOrEmpty(entry.Source))
+        {
+            int dummy = 0;
+            entry.Source = RedactSensitive(entry.Source, ref dummy);
+        }
+    }
+
+    private static string RedactSensitive(string input, ref int count)
+    {
+        input = ReplaceAndCount(_bearerRegex, input, "Bearer [REDACTED]", ref count);
+        input = ReplaceAndCount(_basicRegex, input, "Basic [REDACTED]", ref count);
+        input = ReplaceAndCount(_authorizationHeaderRegex, input, "Authorization: [REDACTED]", ref count);
+        input = ReplaceAndCount(_emailRegex, input, "[REDACTED_EMAIL]", ref count);
+        input = ReplaceAndCount(_phoneRegex, input, "[REDACTED_PHONE]", ref count);
+        return input;
     }
 
     private static int MaskQueryParams(HttpActivityEntry entry)
