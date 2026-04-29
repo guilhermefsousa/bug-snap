@@ -221,6 +221,32 @@ public class AutoCaptureServiceTests
         Assert.True(report.AutoDetected);
     }
 
+    // 5b. With JsError source=blazor-renderer (#blazor-error-ui visible) → dispatched, message in Title
+    // Covers the new flow added when bug-snap.js observes #blazor-error-ui becoming visible
+    // and forwards a synthetic JsErrorEntry with source="blazor-renderer".
+    [Fact]
+    public async Task ReportAsync_WithBlazorRendererJsError_ShouldDispatchWithMessageInTitle()
+    {
+        // Arrange
+        var (svc, dest, _) = Build();
+        var jsError = new JsErrorEntry
+        {
+            Message = "RenderTreeDiffBuilder.AppendDiffEntriesForFramesWithSameSequence",
+            Source = "blazor-renderer",
+            StackTrace = "at Microsoft.AspNetCore.Components.RenderTree.RenderTreeDiffBuilder..."
+        };
+
+        // Act
+        await svc.ReportAsync(null, jsError, "js", default);
+
+        // Assert
+        Assert.Single(dest.ReceivedReports);
+        var report = dest.ReceivedReports[0];
+        Assert.True(report.AutoDetected);
+        Assert.Contains("[auto]", report.Title);
+        Assert.Contains("RenderTreeDiffBuilder", report.Title);
+    }
+
     // 6. Kill switch — when EnableAutoCapture=false, no dispatch and no telemetry
     [Fact]
     public async Task ReportAsync_WhenAutoCaptureDisabled_ShouldNotDispatch()
