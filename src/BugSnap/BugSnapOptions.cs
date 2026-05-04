@@ -16,6 +16,12 @@ public sealed class BugSnapOptions
     public List<IBugReportDestination> Destinations { get; set; } = [];
 
     /// <summary>
+    /// Regex patterns identifying critical URLs (e.g., authentication, integrations).
+    /// When a request to a matching URL is part of a retry pattern, severity is bumped to Critical.
+    /// </summary>
+    public List<string> CriticalUrlPatterns { get; set; } = new();
+
+    /// <summary>
     /// When true, adds a ConsoleDestination that logs to browser console.
     /// IJSRuntime is resolved from DI automatically. For dev/testing only.
     /// </summary>

@@ -2,6 +2,7 @@ using BugSnap;
 using BugSnap.Destinations;
 using BugSnap.Models;
 using BugSnap.Services;
+using Microsoft.Extensions.Options;
 
 namespace BugSnap.Tests.Services;
 
@@ -71,10 +72,14 @@ public class AutoCaptureServiceTests
             new StubContextCollector(),
             dispatcher,
             throttle,
-            telemetry);
+            telemetry,
+            DefaultDetector());
 
         return (service, dest, telemetry);
     }
+
+    private static SeverityDetector DefaultDetector()
+        => new SeverityDetector(Options.Create(new BugSnapOptions()));
 
     // StubContextCollector: returns an empty snapshot without any JS/HTTP
     private sealed class StubContextCollector : BugContextCollector
@@ -112,7 +117,7 @@ public class AutoCaptureServiceTests
         throttle.TryAcquire("warmup-fp", out _); // exhaust the single global slot
 
         var telemetry = new FakeTelemetry();
-        var service = new AutoCaptureService(options, new StubContextCollector(), dispatcher, throttle, telemetry);
+        var service = new AutoCaptureService(options, new StubContextCollector(), dispatcher, throttle, telemetry, DefaultDetector());
 
         return (service, dest, telemetry);
     }
@@ -165,7 +170,7 @@ public class AutoCaptureServiceTests
         var dispatcher = new MultiDestinationDispatcher([dest], options);
         var throttle = new AutoCaptureThrottle(options);
         var telemetry = new FakeTelemetry();
-        var svc = new AutoCaptureService(options, new StubContextCollector(), dispatcher, throttle, telemetry);
+        var svc = new AutoCaptureService(options, new StubContextCollector(), dispatcher, throttle, telemetry, DefaultDetector());
 
         // Act — must NOT throw
         var exception = await Record.ExceptionAsync(

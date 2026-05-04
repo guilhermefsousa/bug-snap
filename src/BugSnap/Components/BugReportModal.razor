@@ -1,6 +1,7 @@
 @inject BugContextCollector Collector
 @inject MultiDestinationDispatcher Dispatcher
 @inject BugSnapOptions Options
+@inject SeverityDetector SeverityDetectorService
 
 @if (Visible)
 {
@@ -212,8 +213,8 @@
         }
     }
 
-    private static BugSnapSeverity DetectSeverity(BugContextSnapshot context)
-        => SeverityDetector.Detect(context);
+    private BugSnapSeverity DetectSeverity(BugContextSnapshot context)
+        => SeverityDetectorService.Detect(context);
 
     private void HandleCancel()
     {

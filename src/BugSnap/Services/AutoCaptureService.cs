@@ -10,7 +10,8 @@ public sealed class AutoCaptureService(
     BugContextCollector contextCollector,
     MultiDestinationDispatcher dispatcher,
     AutoCaptureThrottle throttle,
-    IAutoCaptureTelemetry telemetry)
+    IAutoCaptureTelemetry telemetry,
+    SeverityDetector severityDetector)
 {
     public async Task ReportAsync(
         Exception? blazorEx,
@@ -72,7 +73,7 @@ public sealed class AutoCaptureService(
             var report = new BugReport
             {
                 AutoDetected = true,
-                Severity = SeverityDetector.Detect(context),
+                Severity = severityDetector.Detect(context),
                 Category = context.SuggestedCategory ?? BugSnapCategory.Other,
                 Fingerprint = fingerprint,
                 Title = title,

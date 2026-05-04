@@ -2,6 +2,7 @@ using BugSnap.Destinations;
 using BugSnap.Services;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Microsoft.JSInterop;
 
 namespace BugSnap.Extensions;
@@ -24,6 +25,8 @@ public static class ServiceCollectionExtensions
         configure(options);
 
         services.AddSingleton(options);
+        services.AddSingleton<IOptions<BugSnapOptions>>(sp => new OptionsWrapper<BugSnapOptions>(sp.GetRequiredService<BugSnapOptions>()));
+        services.AddSingleton<SeverityDetector>();
 
         // Core services
         services.AddSingleton(new HttpActivityBuffer(options.MaxHttpEntries));
