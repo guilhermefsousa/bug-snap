@@ -94,8 +94,7 @@ BugSnap provides services, not UI. Create a dialog in your app's design system:
         {
             Title = _description.Length <= 50 ? _description : _description[..50],
             Description = _description,
-            Severity = _context?.RecentRequests.Any(r => r.StatusCode >= 500) == true
-                ? BugSnapSeverity.High : BugSnapSeverity.Low,
+            Severity = _severity, // use injected SeverityDetector.Detect(context) — see Severity classification section
             Category = _context?.SuggestedCategory ?? BugSnapCategory.Other,
             Fingerprint = FingerprintGenerator.Generate(_context ?? new()),
             Context = _context ?? new()
@@ -287,6 +286,48 @@ BugSnap suggests a bug category based on collected evidence:
 | 7 | None of the above | Other |
 
 The suggestion is available in `context.SuggestedCategory` after calling `CollectAsync()`.
+
+---
+
+## Severity classification
+
+`SeverityDetector` evaluates the collected context and returns a `BugSnapSeverity`. Rules are applied in priority order:
+
+| Priority | Condition | Severity |
+|----------|-----------|----------|
+| 1 | Critical URL pattern matches AND (retry pattern detected OR HTTP ≥ 400) | **Critical** |
+| 2 | HTTP ≥ 500 OR JS errors OR retry pattern (≥ 3 identical Method + URL) | **High** |
+| 3 | HTTP 4xx OR SignalR not connected | **Medium** |
+| 4 | Otherwise | **Low** |
+
+`SeverityDetector` is registered in DI by `AddBugSnap` — inject it wherever you build the report:
+
+```csharp
+@inject SeverityDetector SeverityDetector
+
+// inside Submit():
+var severity = SeverityDetector.Detect(_context ?? new());
+```
+
+### Configuring critical URL patterns
+
+Critical URL patterns let you escalate severity for business-critical endpoints even when status codes look fine (e.g. retried 200s on a payment endpoint).
+
+```csharp
+services.AddBugSnap(options =>
+{
+    options.AppName = "MyApp";
+    options.CriticalUrlPatterns = new()
+    {
+        @"/api/payments/.+/charge",
+        @"/api/auth/.+",
+    };
+});
+```
+
+Patterns are compiled regexes (case-insensitive). Invalid patterns are silently skipped. Patterns with catastrophic backtracking are interrupted after 100 ms and treated as non-matching — they do not crash detection.
+
+> **Breaking change (1.0.6 → 1.0.7):** `SeverityDetector` is now DI-injected rather than used as a static utility. If you were calling `SeverityDetector.Detect(context)` as a static method, inject the instance instead (see above).
 
 ---
 

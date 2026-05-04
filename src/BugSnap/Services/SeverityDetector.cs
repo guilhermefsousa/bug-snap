@@ -18,7 +18,7 @@ public sealed class SeverityDetector
         {
             try
             {
-                _criticalRegexes.Add(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase));
+                _criticalRegexes.Add(new Regex(pattern, RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100)));
             }
             catch (Exception ex)
             {
@@ -71,8 +71,14 @@ public sealed class SeverityDetector
 
         foreach (var regex in _criticalRegexes)
         {
-            if (regex.IsMatch(url))
-                return true;
+            try
+            {
+                if (regex.IsMatch(url)) return true;
+            }
+            catch (RegexMatchTimeoutException)
+            {
+                // Pattern took too long — treat as no match, don't crash detection
+            }
         }
 
         return false;

@@ -246,6 +246,28 @@ public class SeverityDetectorTests
         Assert.Null(exception);
     }
 
+    // --- Resilience: catastrophic backtracking pattern must not throw ---
+
+    [Fact]
+    public void Detect_WhenCriticalPatternHasCatastrophicBacktracking_ShouldNotThrow()
+    {
+        // Arrange — classic catastrophic backtracking pattern
+        var detector = CreateDetector(@"^(a+)+$");
+        var context = new BugContextSnapshot
+        {
+            RecentRequests = [new HttpActivityEntry
+            {
+                Method = "GET",
+                Url = new string('a', 50) + "!", // long input that won't match but triggers backtracking
+                StatusCode = 200
+            }]
+        };
+
+        // Act + Assert — must not throw and must complete quickly
+        var ex = Record.Exception(() => detector.Detect(context));
+        Assert.Null(ex);
+    }
+
     // --- Fallback: no critical patterns → generic rules apply ---
 
     [Fact]
