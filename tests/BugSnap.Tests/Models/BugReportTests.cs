@@ -7,13 +7,13 @@ public class BugReportTests
     // --- Default values ---
 
     [Fact]
-    public void BugReport_WhenCreated_ShouldHaveSchemaVersion100()
+    public void BugReport_WhenCreated_ShouldHaveSchemaVersion110()
     {
         // Arrange & Act
         var report = new BugReport();
 
-        // Assert
-        Assert.Equal("1.0.0", report.SchemaVersion);
+        // Assert — bumped to 1.1.0 when memory/console/breadcrumb + StepsToReproduce/ExpectedOrImpact/AutoDetectedSeverity were added
+        Assert.Equal("1.1.0", report.SchemaVersion);
     }
 
     [Fact]

@@ -30,7 +30,9 @@ public static class ServiceCollectionExtensions
 
         // Core services
         services.AddSingleton(new HttpActivityBuffer(options.MaxHttpEntries));
-        services.AddTransient<HttpActivityTracker>();
+        services.AddTransient(sp => new HttpActivityTracker(
+            sp.GetRequiredService<HttpActivityBuffer>(),
+            sp.GetRequiredService<BugSnapOptions>()));
         services.AddScoped<JsErrorCollector>();
         services.AddScoped<BugContextCollector>();
         services.AddScoped<MultiDestinationDispatcher>();

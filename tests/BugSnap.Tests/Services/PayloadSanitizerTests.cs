@@ -84,10 +84,10 @@ public class PayloadSanitizerTests
     }
 
     [Fact]
-    public void Sanitize_WhenUrlContainsOnlyNonSensitiveParams_ShouldLeaveUrlUnchanged()
+    public void Sanitize_WhenUrlContainsOnlySafeAllowlistParams_ShouldLeaveUrlUnchanged()
     {
-        // Arrange
-        const string originalUrl = "https://api.example.com/search?page=1&size=10&sort=asc";
+        // Arrange — all keys are in the safe allowlist
+        const string originalUrl = "https://api.example.com/search?page=1&page_size=10&sort=asc";
         var entry = EntryWithUrl(originalUrl);
         var report = ReportWith(entry);
 
@@ -111,6 +111,119 @@ public class PayloadSanitizerTests
 
         // Assert
         Assert.Equal(originalUrl, entry.Url);
+    }
+
+    // --- Redact-by-default: PII query params are masked (Rule 7) ---
+
+    [Theory]
+    [InlineData("email", "user@example.com")]
+    [InlineData("phone", "5511999998888")]
+    [InlineData("cpf", "12345678900")]
+    [InlineData("q", "Joao da Silva")]
+    public void Sanitize_WhenUrlContainsPiiQueryParam_ShouldRedactValue(string key, string value)
+    {
+        // Arrange — none of these keys are in the safe allowlist
+        var entry = EntryWithUrl($"https://api.example.com/data?{key}={Uri.EscapeDataString(value)}");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains($"{key}=[REDACTED]", entry.Url);
+        Assert.DoesNotContain(Uri.EscapeDataString(value), entry.Url);
+        Assert.DoesNotContain("Silva", entry.Url);
+        Assert.Equal(1, result.QueryParamsMasked);
+    }
+
+    [Fact]
+    public void Sanitize_WhenUrlHasBareQueryToken_ShouldRedactIt()
+    {
+        // A flag-style token without '=' has no key → cannot be allowlisted → must be masked.
+        var entry = EntryWithUrl("https://api.example.com/x?5511999998888");
+        var report = ReportWith(entry);
+
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        Assert.Contains("[REDACTED]", entry.Url);
+        Assert.DoesNotContain("5511999998888", entry.Url);
+    }
+
+    // --- Rule 5: user-provided free-text fields (StepsToReproduce/ExpectedOrImpact) are sanitized ---
+
+    [Fact]
+    public void Sanitize_WhenUserTextFieldsContainPii_ShouldRedactEmailAndPhone()
+    {
+        // Arrange — manual-report fields with PII typed by the user
+        var report = new BugReport
+        {
+            StepsToReproduce = "Liguei pro cliente joao@example.com no 5511988887777 e a tela quebrou",
+            ExpectedOrImpact = "Esperava enviar a mensagem pro 5521977776666"
+        };
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert — email + phones redacted in both fields (Rule 5)
+        Assert.DoesNotContain("joao@example.com", report.StepsToReproduce);
+        Assert.DoesNotContain("5511988887777", report.StepsToReproduce);
+        Assert.Contains("[REDACTED_EMAIL]", report.StepsToReproduce);
+        Assert.Contains("[REDACTED_PHONE]", report.StepsToReproduce);
+        Assert.DoesNotContain("5521977776666", report.ExpectedOrImpact);
+        Assert.Contains("[REDACTED_PHONE]", report.ExpectedOrImpact);
+    }
+
+    [Theory]
+    [InlineData("page", "2")]
+    [InlineData("tab", "conv")]
+    [InlineData("id", "123")]
+    public void Sanitize_WhenUrlContainsSafeAllowlistParam_ShouldPreserveValue(string key, string value)
+    {
+        // Arrange — safe navigation/pagination keys are preserved
+        var entry = EntryWithUrl($"https://api.example.com/data?{key}={value}");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains($"{key}={value}", entry.Url);
+        Assert.DoesNotContain("[REDACTED]", entry.Url);
+        Assert.Equal(0, result.QueryParamsMasked);
+    }
+
+    [Fact]
+    public void Sanitize_WhenSafeKeyDiffersOnlyByCase_ShouldStillPreserve()
+    {
+        // Arrange — allowlist match is case-insensitive
+        var entry = EntryWithUrl("https://api.example.com/data?Page=3&TAB=inbox");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Equal("https://api.example.com/data?Page=3&TAB=inbox", entry.Url);
+        Assert.Equal(0, result.QueryParamsMasked);
+    }
+
+    [Fact]
+    public void Sanitize_WhenUrlMixesSafeAndUnknownParams_ShouldRedactOnlyUnknown()
+    {
+        // Arrange — page kept, email + name masked
+        var entry = EntryWithUrl("https://api.example.com/list?page=1&email=a@b.com&name=Maria");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("page=1", entry.Url);
+        Assert.Contains("email=[REDACTED]", entry.Url);
+        Assert.Contains("name=[REDACTED]", entry.Url);
+        Assert.DoesNotContain("a@b.com", entry.Url);
+        Assert.DoesNotContain("Maria", entry.Url);
+        Assert.Equal(2, result.QueryParamsMasked);
     }
 
     // --- ErrorSnippet: Bearer/Basic masking ---
@@ -301,5 +414,121 @@ public class PayloadSanitizerTests
 
         // Assert
         Assert.Equal(maxLength, jsError.StackTrace!.Length);
+    }
+
+    // --- Console error sanitization ---
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorMessageContainsEmail_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "render failed for admin@corp.io while loading"
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED_EMAIL]", consoleError.Message);
+        Assert.DoesNotContain("admin@corp.io", consoleError.Message);
+    }
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorStackContainsBearer_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "fetch error",
+            Stack = "at fetch headers: Bearer eyJhbGciOiJIUzI1NiJ9.secret.sig\n at app.js:12"
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("Bearer [REDACTED]", consoleError.Stack);
+        Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9.secret.sig", consoleError.Stack);
+    }
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorMessageExceedsMaxLength_ShouldTruncate()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "safe " + new string('y', 200)
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions(maxSnippetLength: 40));
+
+        // Assert
+        Assert.Equal(40, consoleError.Message.Length);
+    }
+
+    // --- Breadcrumb sanitization ---
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailContainsPhone_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry
+        {
+            Type = "navigation",
+            Detail = "/contacts/5511999998888/profile"
+        };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED_PHONE]", breadcrumb.Detail);
+        Assert.DoesNotContain("5511999998888", breadcrumb.Detail);
+    }
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailIsSafeRoute_ShouldLeaveUnchanged()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry
+        {
+            Type = "click",
+            Detail = "open-settings"
+        };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Equal("open-settings", breadcrumb.Detail);
+    }
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailIsNull_ShouldNotThrow()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry { Type = "navigation", Detail = null };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        var ex = Record.Exception(() => PayloadSanitizer.Sanitize(report, DefaultOptions()));
+
+        // Assert
+        Assert.Null(ex);
+        Assert.Null(breadcrumb.Detail);
     }
 }

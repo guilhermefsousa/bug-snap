@@ -10,7 +10,24 @@ public static class FingerprintGenerator
         @"/([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\d{2,})/",
         RegexOptions.Compiled);
 
+    // Matches GUIDs and standalone numeric runs anywhere in a free-text description
+    private static readonly Regex _descriptionIdPattern = new(
+        @"\b([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|\d+)\b",
+        RegexOptions.Compiled);
+
+    private static readonly Regex _whitespacePattern = new(@"\s+", RegexOptions.Compiled);
+
     public static string Generate(BugContextSnapshot context)
+        => Generate(context, userDescription: null);
+
+    /// <summary>
+    /// Computes a deduplication fingerprint. When there is no technical error signal
+    /// (no JS error and no HTTP &gt;= 400 — typical of a thin manual report), the user's
+    /// description is folded into the hash so distinct manual reports on the same route
+    /// don't collapse into one fingerprint. When a technical signature exists, the
+    /// description is ignored to keep crash dedup stable across the auto-capture path.
+    /// </summary>
+    public static string Generate(BugContextSnapshot context, string? userDescription)
     {
         var route = NormalizePath(context.CurrentRoute);
         var errorSignature = GetErrorSignature(context);
@@ -18,7 +35,24 @@ public static class FingerprintGenerator
 
         var raw = $"{route}|{errorSignature}|{version}";
 
+        // Thin manual report (no technical signal): discriminate by description so
+        // two different manual reports on the same route get different fingerprints.
+        if (errorSignature == "no-error" && !string.IsNullOrWhiteSpace(userDescription))
+        {
+            raw += $"|desc:{NormalizeDescription(userDescription)}";
+        }
+
         return ComputeShortHash(raw);
+    }
+
+    private static string NormalizeDescription(string description)
+    {
+        // Lowercase, strip GUIDs/numbers, collapse whitespace, truncate ~80 chars
+        var normalized = _descriptionIdPattern.Replace(description, "{id}");
+        normalized = _whitespacePattern.Replace(normalized, " ").Trim().ToLowerInvariant();
+        if (normalized.Length > 80)
+            normalized = normalized[..80];
+        return normalized;
     }
 
     private static string NormalizePath(string path)

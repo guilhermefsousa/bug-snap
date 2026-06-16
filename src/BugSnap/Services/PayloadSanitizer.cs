@@ -5,8 +5,15 @@ namespace BugSnap.Services;
 
 public static class PayloadSanitizer
 {
-    private static readonly string[] _sensitiveQueryParams =
-        ["token", "key", "api_key", "access_token", "secret"];
+    // Redact-by-default: every query parameter value is masked EXCEPT these known-safe
+    // navigation/pagination keys. Inverting the old sensitive-allowlist closes a PII leak
+    // (?email= / ?cpf= / ?phone= / ?q=<name> would otherwise survive into the issue body
+    // now that the query string is preserved). Case-insensitive.
+    private static readonly HashSet<string> _safeQueryParams = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "page", "page_size", "tab", "id", "limit", "offset",
+        "status", "sort", "order", "view", "lang", "cursor"
+    };
 
     private static readonly Regex _bearerRegex =
         new(@"Bearer\s+\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -52,6 +59,22 @@ public static class PayloadSanitizer
             SanitizeJsError(jsError, options.MaxErrorSnippetLength);
         }
 
+        // Sanitize console errors (message, stack)
+        foreach (var consoleError in report.Context.RecentConsoleErrors)
+        {
+            SanitizeConsoleError(consoleError, options.MaxErrorSnippetLength);
+        }
+
+        // Sanitize breadcrumb details (route / data-bugsnap-action value)
+        foreach (var breadcrumb in report.Context.Breadcrumbs)
+        {
+            SanitizeBreadcrumb(breadcrumb, options.MaxErrorSnippetLength);
+        }
+
+        // Sanitize optional, user-provided free-text fields (Rule 5: mandatory before any destination)
+        report.StepsToReproduce = SanitizeUserText(report.StepsToReproduce, options.MaxErrorSnippetLength);
+        report.ExpectedOrImpact = SanitizeUserText(report.ExpectedOrImpact, options.MaxErrorSnippetLength);
+
         return new SanitizationResult(headerPatternsMasked, queryParamsMasked, snippetsTruncated);
     }
 
@@ -78,6 +101,50 @@ public static class PayloadSanitizer
             int dummy = 0;
             entry.Source = RedactSensitive(entry.Source, ref dummy);
         }
+    }
+
+    private static void SanitizeConsoleError(ConsoleErrorEntry entry, int maxLength)
+    {
+        if (!string.IsNullOrEmpty(entry.Message))
+        {
+            int dummy = 0;
+            entry.Message = RedactSensitive(entry.Message, ref dummy);
+            if (entry.Message.Length > maxLength)
+                entry.Message = entry.Message[..maxLength];
+        }
+
+        if (!string.IsNullOrEmpty(entry.Stack))
+        {
+            int dummy = 0;
+            entry.Stack = RedactSensitive(entry.Stack, ref dummy);
+            if (entry.Stack.Length > maxLength)
+                entry.Stack = entry.Stack[..maxLength];
+        }
+    }
+
+    private static void SanitizeBreadcrumb(BreadcrumbEntry entry, int maxLength)
+    {
+        if (!string.IsNullOrEmpty(entry.Detail))
+        {
+            int dummy = 0;
+            entry.Detail = RedactSensitive(entry.Detail, ref dummy);
+            if (entry.Detail.Length > maxLength)
+                entry.Detail = entry.Detail[..maxLength];
+        }
+    }
+
+    private static string? SanitizeUserText(string? input, int maxLength)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+
+        int dummy = 0;
+        var sanitized = RedactSensitive(input, ref dummy);
+        sanitized = ReplaceAndCount(_cookieHeaderRegex, sanitized, "Cookie: [REDACTED]", ref dummy);
+        sanitized = ReplaceAndCount(_apiKeyHeaderRegex, sanitized, "X-Api-Key: [REDACTED]", ref dummy);
+        if (sanitized.Length > maxLength)
+            sanitized = sanitized[..maxLength];
+        return sanitized;
     }
 
     private static string RedactSensitive(string input, ref int count)
@@ -114,19 +181,23 @@ public static class PayloadSanitizer
                 var eqIndex = pair.IndexOf('=');
                 if (eqIndex < 0)
                 {
-                    modified.Add(pair);
+                    // A bare query token (no '=') has no key, so it can never match the safe
+                    // allowlist — redact it by default (e.g. ?5511999998888 / ?user@host).
+                    modified.Add("[REDACTED]");
+                    masked++;
                     continue;
                 }
 
                 var paramName = pair[..eqIndex];
-                if (_sensitiveQueryParams.Contains(paramName, StringComparer.OrdinalIgnoreCase))
+                // Redact-by-default: keep only known-safe keys; mask everything else.
+                if (_safeQueryParams.Contains(paramName))
                 {
-                    modified.Add(paramName + "=[REDACTED]");
-                    masked++;
+                    modified.Add(pair);
                 }
                 else
                 {
-                    modified.Add(pair);
+                    modified.Add(paramName + "=[REDACTED]");
+                    masked++;
                 }
             }
 

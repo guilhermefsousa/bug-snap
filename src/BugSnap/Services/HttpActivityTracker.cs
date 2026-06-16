@@ -6,10 +6,12 @@ namespace BugSnap.Services;
 public sealed class HttpActivityTracker : DelegatingHandler
 {
     private readonly HttpActivityBuffer _buffer;
+    private readonly int _maxErrorBodyLength;
 
-    public HttpActivityTracker(HttpActivityBuffer buffer)
+    public HttpActivityTracker(HttpActivityBuffer buffer, BugSnapOptions options)
     {
         _buffer = buffer;
+        _maxErrorBodyLength = options.MaxHttpErrorBodyLength;
     }
 
     protected override async Task<HttpResponseMessage> SendAsync(
@@ -34,7 +36,7 @@ public sealed class HttpActivityTracker : DelegatingHandler
                 StatusCode = 0,
                 DurationMs = sw.ElapsedMilliseconds,
                 TimestampUtc = timestamp,
-                ErrorSnippet = $"{ex.GetType().Name}: {Truncate(ex.Message, 500)}"
+                ErrorSnippet = $"{ex.GetType().Name}: {Truncate(ex.Message, _maxErrorBodyLength)}"
             });
             throw;
         }
@@ -54,7 +56,7 @@ public sealed class HttpActivityTracker : DelegatingHandler
                 // ReadAsStringAsync is safe in Blazor WASM (HttpContent buffers internally).
                 // The content remains readable by the caller after this read.
                 var body = await response.Content.ReadAsStringAsync(cancellationToken);
-                errorSnippet = Truncate(body, 500);
+                errorSnippet = Truncate(body, _maxErrorBodyLength);
             }
             catch
             {
@@ -80,7 +82,10 @@ public sealed class HttpActivityTracker : DelegatingHandler
     private static string BuildSafeUrl(Uri? uri)
     {
         if (uri is null) return "";
-        return uri.GetLeftPart(UriPartial.Path);
+        // Preserve path + query so debugging context is not lost. The query string is
+        // redacted-by-default during sanitization (PayloadSanitizer.MaskQueryParams),
+        // so this is safe before the report reaches any destination.
+        return uri.IsAbsoluteUri ? uri.PathAndQuery : uri.OriginalString;
     }
 
     private static string Truncate(string value, int maxLength)

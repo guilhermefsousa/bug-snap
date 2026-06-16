@@ -18,7 +18,14 @@ public class BugContextCollector(
         var browserInfo = await jsErrorCollector.GetBrowserInfoAsync();
         var screenSize = await jsErrorCollector.GetScreenSizeAsync();
         var jsErrors = await jsErrorCollector.GetErrorsAsync();
+        var consoleErrors = await jsErrorCollector.GetConsoleErrorsAsync();
+        var breadcrumbs = await jsErrorCollector.GetBreadcrumbsAsync();
         var customContext = await contextProvider.GetCustomContextAsync(ct);
+
+        // performance.memory is Chromium-only (null on Firefox/Safari); GC.GetTotalMemory
+        // is the cross-browser fallback that always works in the WASM runtime.
+        var memory = await jsErrorCollector.GetMemoryInfoAsync();
+        memory.ManagedHeapBytes = GC.GetTotalMemory(false);
 
         var recentRequests = httpBuffer.GetRecentActivity();
 
@@ -46,6 +53,9 @@ public class BugContextCollector(
             Environment = options.Environment,
             RecentRequests = recentRequests,
             RecentJsErrors = jsErrors,
+            Memory = memory,
+            RecentConsoleErrors = consoleErrors,
+            Breadcrumbs = breadcrumbs,
             CustomContext = customContext,
             PageInstanceId = Guid.NewGuid().ToString("N"),
             CollectedAtUtc = DateTime.UtcNow,

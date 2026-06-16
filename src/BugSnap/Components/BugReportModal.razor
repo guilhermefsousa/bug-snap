@@ -39,7 +39,80 @@
                     <textarea id="bs-description" class="bs-textarea" rows="5"
                               placeholder="O que aconteceu?"
                               @bind="_description" @bind:event="oninput" maxlength="2000"></textarea>
+                    @if (string.IsNullOrWhiteSpace(_description))
+                    {
+                        <small class="bs-helper">Descreva o problema para habilitar o envio.</small>
+                    }
                 </div>
+
+                <div class="bs-field">
+                    <label class="bs-label" for="bs-severity">Gravidade</label>
+                    <select id="bs-severity" class="bs-select" @bind="_selectedSeverity">
+                        <option value="@BugSnapSeverity.Low">Baixa</option>
+                        <option value="@BugSnapSeverity.Medium">Média</option>
+                        <option value="@BugSnapSeverity.High">Alta</option>
+                        <option value="@BugSnapSeverity.Critical">Crítica</option>
+                    </select>
+                </div>
+
+                <div class="bs-field">
+                    <span class="bs-chip">Categoria detectada: @CategoryLabel(_detectedCategory)</span>
+                    <label class="bs-label" for="bs-category">Categoria</label>
+                    <select id="bs-category" class="bs-select" @bind="_selectedCategory">
+                        @foreach (var cat in _categories)
+                        {
+                            <option value="@cat">@CategoryLabel(cat)</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="bs-field">
+                    <button type="button" class="bs-collapse-toggle" @onclick="ToggleOptionalFields">
+                        @(_optionalFieldsExpanded ? "▼" : "▶") Detalhes adicionais (opcional)
+                    </button>
+                    @if (_optionalFieldsExpanded)
+                    {
+                        <div class="bs-collapse-body">
+                            <label class="bs-label" for="bs-steps">Passos para reproduzir (opcional)</label>
+                            <textarea id="bs-steps" class="bs-textarea" rows="3"
+                                      placeholder="1. Abri a tela... 2. Cliquei em... 3. O erro apareceu..."
+                                      @bind="_stepsToReproduce" @bind:event="oninput" maxlength="2000"></textarea>
+
+                            <label class="bs-label" for="bs-expected">O que você esperava / impacto (opcional)</label>
+                            <textarea id="bs-expected" class="bs-textarea" rows="3"
+                                      placeholder="Eu esperava que... O impacto é..."
+                                      @bind="_expectedOrImpact" @bind:event="oninput" maxlength="2000"></textarea>
+                        </div>
+                    }
+                </div>
+
+                @if (_context is not null)
+                {
+                    <div class="bs-preview">
+                        <button type="button" class="bs-collapse-toggle" @onclick="TogglePreview">
+                            @(_previewExpanded ? "▼" : "▶") O que será enviado
+                        </button>
+                        @if (_previewExpanded)
+                        {
+                            <ul class="bs-preview-list">
+                                <li>Tela: @_context.CurrentRoute</li>
+                                <li>@_context.RecentJsErrors.Count erro(s) técnico(s)</li>
+                                <li>@_context.RecentRequests.Count requisição(ões) capturada(s)</li>
+                                <li>Dados sensíveis mascarados automaticamente</li>
+                                <li>Gravidade detectada: @SeverityLabel(_detectedSeverity)</li>
+                                <li>Categoria detectada: @CategoryLabel(_detectedCategory)</li>
+                            </ul>
+
+                            <button type="button" class="bs-collapse-toggle" @onclick="ToggleTechnicalDetails">
+                                @(_technicalDetailsExpanded ? "▼" : "▶") Ver detalhes técnicos
+                            </button>
+                            @if (_technicalDetailsExpanded)
+                            {
+                                <pre class="bs-preview-json">@_previewJson</pre>
+                            }
+                        }
+                    </div>
+                }
 
                 <div class="bs-screenshot-row">
                     <InputFile id="bs-screenshot-input" class="bs-file-input-hidden" accept="image/*" OnChange="HandleFileSelected" />
@@ -83,18 +156,36 @@
     [Parameter] public EventCallback<bool> VisibleChanged { get; set; }
     [Parameter] public EventCallback<BugReport> OnReportSubmitted { get; set; }
 
+    private static readonly BugSnapCategory[] _categories = Enum.GetValues<BugSnapCategory>();
+
     private string _description = "";
+    private string? _stepsToReproduce;
+    private string? _expectedOrImpact;
     private byte[]? _screenshotBytes;
     private string? _screenshotFileName;
 
     private BugContextSnapshot? _context;
+    private BugSnapSeverity _detectedSeverity = BugSnapSeverity.Low;
+    private BugSnapSeverity _selectedSeverity = BugSnapSeverity.Low;
+    private BugSnapCategory _detectedCategory = BugSnapCategory.Other;
+    private BugSnapCategory _selectedCategory = BugSnapCategory.Other;
+
+    private bool _previewExpanded;
+    private string _previewJson = "{}"; // materialized when the technical panel is opened (avoids re-sanitizing on every keystroke)
+    private bool _technicalDetailsExpanded;
+    private bool _optionalFieldsExpanded;
+
     private bool _submitting;
     private bool _submitSuccess;
     private string? _submitError;
     private bool _rateLimited;
     private int _rateLimitSecondsRemaining;
 
-    private static DateTime _lastSubmitTime = DateTime.MinValue;
+    // Instance-scoped rate-limit gate. Was static, which made every modal instance share one
+    // process-wide cooldown — an unrelated modal submit could silently block this user's first
+    // manual submit. (Auto-capture has its own AutoCaptureThrottle and never touched this field.)
+    // Per-instance keeps the manual flow's rate limit independent.
+    private DateTime _lastSubmitTime = DateTime.MinValue;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -115,6 +206,11 @@
             // Context collection failing should not block the form
             _context = new BugContextSnapshot();
         }
+
+        _detectedSeverity = SeverityDetectorService.Detect(_context);
+        _selectedSeverity = _detectedSeverity;
+        _detectedCategory = _context.SuggestedCategory ?? BugSnapCategory.Other;
+        _selectedCategory = _detectedCategory;
     }
 
     private async Task HandleFileSelected(InputFileChangeEventArgs e)
@@ -131,6 +227,16 @@
         _screenshotBytes = ms.ToArray();
         _screenshotFileName = file.Name;
     }
+
+    private void TogglePreview() => _previewExpanded = !_previewExpanded;
+    private void ToggleTechnicalDetails()
+    {
+        _technicalDetailsExpanded = !_technicalDetailsExpanded;
+        // Materialize the sanitized preview once on open (snapshot), not on every render/keystroke.
+        if (_technicalDetailsExpanded)
+            _previewJson = BuildSanitizedPreviewJson();
+    }
+    private void ToggleOptionalFields() => _optionalFieldsExpanded = !_optionalFieldsExpanded;
 
     private async Task HandleSubmit()
     {
@@ -169,18 +275,21 @@
             }
             if (string.IsNullOrEmpty(title)) title = "Bug report";
 
-            var severity = DetectSeverity(_context);
-            var category = _context.SuggestedCategory ?? BugSnapCategory.Other;
+            var steps = string.IsNullOrWhiteSpace(_stepsToReproduce) ? null : _stepsToReproduce.Trim();
+            var expected = string.IsNullOrWhiteSpace(_expectedOrImpact) ? null : _expectedOrImpact.Trim();
 
             var report = new BugReport
             {
                 Title = title,
                 Description = _description.Trim(),
-                Severity = severity,
-                Category = category,
+                Severity = _selectedSeverity,
+                AutoDetectedSeverity = _detectedSeverity.ToString(),
+                Category = _selectedCategory,
+                StepsToReproduce = steps,
+                ExpectedOrImpact = expected,
                 Screenshot = _screenshotBytes,
                 ScreenshotFileName = _screenshotFileName,
-                Fingerprint = FingerprintGenerator.Generate(_context),
+                Fingerprint = FingerprintGenerator.Generate(_context, _description.Trim()),
                 Context = _context
             };
 
@@ -213,9 +322,6 @@
         }
     }
 
-    private BugSnapSeverity DetectSeverity(BugContextSnapshot context)
-        => SeverityDetectorService.Detect(context);
-
     private void HandleCancel()
     {
         ResetForm();
@@ -231,11 +337,108 @@
     private void ResetForm()
     {
         _description = "";
+        _stepsToReproduce = null;
+        _expectedOrImpact = null;
         _screenshotBytes = null;
         _screenshotFileName = null;
         _context = null;
+        _detectedSeverity = BugSnapSeverity.Low;
+        _selectedSeverity = BugSnapSeverity.Low;
+        _detectedCategory = BugSnapCategory.Other;
+        _selectedCategory = BugSnapCategory.Other;
+        _previewExpanded = false;
+        _technicalDetailsExpanded = false;
+        _optionalFieldsExpanded = false;
         _submitSuccess = false;
         _submitError = null;
         _rateLimited = false;
     }
+
+    private static string SeverityLabel(BugSnapSeverity severity) => severity switch
+    {
+        BugSnapSeverity.Low => "Baixa",
+        BugSnapSeverity.Medium => "Média",
+        BugSnapSeverity.High => "Alta",
+        BugSnapSeverity.Critical => "Crítica",
+        _ => severity.ToString()
+    };
+
+    private static string CategoryLabel(BugSnapCategory category) => category switch
+    {
+        BugSnapCategory.UI => "Interface",
+        BugSnapCategory.API => "API",
+        BugSnapCategory.Auth => "Autenticação",
+        BugSnapCategory.Performance => "Desempenho",
+        BugSnapCategory.SignalR => "SignalR",
+        BugSnapCategory.Data => "Dados",
+        BugSnapCategory.Integration => "Integração",
+        BugSnapCategory.Other => "Outro",
+        _ => category.ToString()
+    };
+
+    // Builds the JSON shown under "Ver detalhes técnicos" from a sanitized COPY of the
+    // context, so previewing never mutates the live context the user is still editing
+    // and never bypasses Rule 5 (sanitization is mandatory before display/send).
+    private string BuildSanitizedPreviewJson()
+    {
+        if (_context is null) return "{}";
+
+        var previewReport = new BugReport
+        {
+            Title = _description.Trim(),
+            Description = _description.Trim(),
+            Severity = _selectedSeverity,
+            AutoDetectedSeverity = _detectedSeverity.ToString(),
+            Category = _selectedCategory,
+            StepsToReproduce = string.IsNullOrWhiteSpace(_stepsToReproduce) ? null : _stepsToReproduce.Trim(),
+            ExpectedOrImpact = string.IsNullOrWhiteSpace(_expectedOrImpact) ? null : _expectedOrImpact.Trim(),
+            Context = CloneContext(_context)
+        };
+
+        PayloadSanitizer.Sanitize(previewReport, Options);
+
+        return System.Text.Json.JsonSerializer.Serialize(previewReport, new System.Text.Json.JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase
+        });
+    }
+
+    private static BugContextSnapshot CloneContext(BugContextSnapshot source) => new()
+    {
+        CurrentRoute = source.CurrentRoute,
+        BrowserInfo = source.BrowserInfo,
+        ScreenSize = source.ScreenSize,
+        SignalRState = source.SignalRState,
+        AppName = source.AppName,
+        AppVersion = source.AppVersion,
+        Environment = source.Environment,
+        CollectedAtUtc = source.CollectedAtUtc,
+        TraceId = source.TraceId,
+        CorrelationId = source.CorrelationId,
+        SessionId = source.SessionId,
+        PageInstanceId = source.PageInstanceId,
+        SuggestedCategory = source.SuggestedCategory,
+        CustomContext = new Dictionary<string, string>(source.CustomContext),
+        RecentRequests = source.RecentRequests.Select(r => new HttpActivityEntry
+        {
+            Method = r.Method,
+            Url = r.Url,
+            StatusCode = r.StatusCode,
+            DurationMs = r.DurationMs,
+            TimestampUtc = r.TimestampUtc,
+            ErrorSnippet = r.ErrorSnippet,
+            TraceId = r.TraceId,
+            CorrelationId = r.CorrelationId
+        }).ToList(),
+        RecentJsErrors = source.RecentJsErrors.Select(e => new JsErrorEntry
+        {
+            Message = e.Message,
+            Source = e.Source,
+            Line = e.Line,
+            Column = e.Column,
+            TimestampUtc = e.TimestampUtc,
+            StackTrace = e.StackTrace
+        }).ToList()
+    };
 }
