@@ -112,6 +112,22 @@ public class GitHubIssueDestination : IBugReportDestination
         sb.AppendLine(report.Description);
         sb.AppendLine();
 
+        // Optional reproduction steps
+        if (!string.IsNullOrWhiteSpace(report.StepsToReproduce))
+        {
+            sb.AppendLine("### Passos para reproduzir");
+            sb.AppendLine(report.StepsToReproduce);
+            sb.AppendLine();
+        }
+
+        // Optional expected behavior / impact
+        if (!string.IsNullOrWhiteSpace(report.ExpectedOrImpact))
+        {
+            sb.AppendLine("### Impacto esperado");
+            sb.AppendLine(report.ExpectedOrImpact);
+            sb.AppendLine();
+        }
+
         // Environment
         sb.AppendLine("### Environment");
         sb.AppendLine("| Key | Value |");

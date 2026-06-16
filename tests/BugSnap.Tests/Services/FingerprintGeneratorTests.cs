@@ -229,4 +229,110 @@ public class FingerprintGeneratorTests
         // Assert
         Assert.NotEqual(fpA, fpB);
     }
+
+    // --- B7: thin manual report (no-error) discriminated by user description ---
+
+    [Fact]
+    public void Generate_WhenNoErrorAndDescriptionsDiffer_ShouldReturnDifferentFingerprints()
+    {
+        // Arrange — same route/version, no JS error, no HTTP >= 400 (errorSignature = "no-error")
+        var context = new BugContextSnapshot
+        {
+            CurrentRoute = "/inbox",
+            AppVersion = "1.0.0",
+            RecentJsErrors = [],
+            RecentRequests = []
+        };
+
+        // Act
+        var fpA = FingerprintGenerator.Generate(context, "O botão de enviar não funciona");
+        var fpB = FingerprintGenerator.Generate(context, "A lista de contatos está vazia");
+
+        // Assert
+        Assert.NotEqual(fpA, fpB);
+    }
+
+    [Fact]
+    public void Generate_WhenNoErrorAndSameDescription_ShouldReturnSameFingerprint()
+    {
+        // Arrange
+        var context = new BugContextSnapshot
+        {
+            CurrentRoute = "/inbox",
+            AppVersion = "1.0.0",
+            RecentJsErrors = [],
+            RecentRequests = []
+        };
+
+        // Act
+        var fpA = FingerprintGenerator.Generate(context, "O botão de enviar não funciona");
+        var fpB = FingerprintGenerator.Generate(context, "O botão de enviar não funciona");
+
+        // Assert
+        Assert.Equal(fpA, fpB);
+    }
+
+    [Fact]
+    public void Generate_WhenNoErrorAndDescriptionsDifferOnlyByIdsOrNumbers_ShouldReturnSameFingerprint()
+    {
+        // Arrange — IDs/numbers are stripped before hashing, so otherwise-identical
+        // descriptions still collapse to the same fingerprint.
+        var context = new BugContextSnapshot
+        {
+            CurrentRoute = "/inbox",
+            AppVersion = "1.0.0",
+            RecentJsErrors = [],
+            RecentRequests = []
+        };
+
+        // Act
+        var fpA = FingerprintGenerator.Generate(context, "Erro no pedido 12345");
+        var fpB = FingerprintGenerator.Generate(context, "Erro no pedido 98765");
+
+        // Assert
+        Assert.Equal(fpA, fpB);
+    }
+
+    [Fact]
+    public void Generate_WhenTechnicalErrorPresent_ShouldIgnoreDescription()
+    {
+        // Arrange — a JS error means errorSignature != "no-error", so the description
+        // must NOT influence the fingerprint (keeps crash dedup stable on auto-capture path).
+        var context = new BugContextSnapshot
+        {
+            CurrentRoute = "/inbox",
+            AppVersion = "1.0.0",
+            RecentJsErrors = [new JsErrorEntry { Message = "TypeError: x is undefined" }],
+            RecentRequests = []
+        };
+
+        // Act
+        var fpWithDesc = FingerprintGenerator.Generate(context, "uma descrição qualquer");
+        var fpAuto = FingerprintGenerator.Generate(context);
+
+        // Assert
+        Assert.Equal(fpAuto, fpWithDesc);
+    }
+
+    [Fact]
+    public void Generate_WhenNoErrorAndNoDescription_ShouldMatchNoDescriptionOverload()
+    {
+        // Arrange
+        var context = new BugContextSnapshot
+        {
+            CurrentRoute = "/inbox",
+            AppVersion = "1.0.0",
+            RecentJsErrors = [],
+            RecentRequests = []
+        };
+
+        // Act
+        var fpNull = FingerprintGenerator.Generate(context, null);
+        var fpEmpty = FingerprintGenerator.Generate(context, "   ");
+        var fpAuto = FingerprintGenerator.Generate(context);
+
+        // Assert — null/whitespace description leaves the auto fingerprint unchanged
+        Assert.Equal(fpAuto, fpNull);
+        Assert.Equal(fpAuto, fpEmpty);
+    }
 }

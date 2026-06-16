@@ -52,6 +52,10 @@ public static class PayloadSanitizer
             SanitizeJsError(jsError, options.MaxErrorSnippetLength);
         }
 
+        // Sanitize optional, user-provided free-text fields (Rule 5: mandatory before any destination)
+        report.StepsToReproduce = SanitizeUserText(report.StepsToReproduce, options.MaxErrorSnippetLength);
+        report.ExpectedOrImpact = SanitizeUserText(report.ExpectedOrImpact, options.MaxErrorSnippetLength);
+
         return new SanitizationResult(headerPatternsMasked, queryParamsMasked, snippetsTruncated);
     }
 
@@ -78,6 +82,20 @@ public static class PayloadSanitizer
             int dummy = 0;
             entry.Source = RedactSensitive(entry.Source, ref dummy);
         }
+    }
+
+    private static string? SanitizeUserText(string? input, int maxLength)
+    {
+        if (string.IsNullOrEmpty(input))
+            return input;
+
+        int dummy = 0;
+        var sanitized = RedactSensitive(input, ref dummy);
+        sanitized = ReplaceAndCount(_cookieHeaderRegex, sanitized, "Cookie: [REDACTED]", ref dummy);
+        sanitized = ReplaceAndCount(_apiKeyHeaderRegex, sanitized, "X-Api-Key: [REDACTED]", ref dummy);
+        if (sanitized.Length > maxLength)
+            sanitized = sanitized[..maxLength];
+        return sanitized;
     }
 
     private static string RedactSensitive(string input, ref int count)
