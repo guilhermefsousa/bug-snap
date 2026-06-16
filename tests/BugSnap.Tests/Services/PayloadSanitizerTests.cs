@@ -136,6 +136,43 @@ public class PayloadSanitizerTests
         Assert.Equal(1, result.QueryParamsMasked);
     }
 
+    [Fact]
+    public void Sanitize_WhenUrlHasBareQueryToken_ShouldRedactIt()
+    {
+        // A flag-style token without '=' has no key → cannot be allowlisted → must be masked.
+        var entry = EntryWithUrl("https://api.example.com/x?5511999998888");
+        var report = ReportWith(entry);
+
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        Assert.Contains("[REDACTED]", entry.Url);
+        Assert.DoesNotContain("5511999998888", entry.Url);
+    }
+
+    // --- Rule 5: user-provided free-text fields (StepsToReproduce/ExpectedOrImpact) are sanitized ---
+
+    [Fact]
+    public void Sanitize_WhenUserTextFieldsContainPii_ShouldRedactEmailAndPhone()
+    {
+        // Arrange — manual-report fields with PII typed by the user
+        var report = new BugReport
+        {
+            StepsToReproduce = "Liguei pro cliente joao@example.com no 5511988887777 e a tela quebrou",
+            ExpectedOrImpact = "Esperava enviar a mensagem pro 5521977776666"
+        };
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert — email + phones redacted in both fields (Rule 5)
+        Assert.DoesNotContain("joao@example.com", report.StepsToReproduce);
+        Assert.DoesNotContain("5511988887777", report.StepsToReproduce);
+        Assert.Contains("[REDACTED_EMAIL]", report.StepsToReproduce);
+        Assert.Contains("[REDACTED_PHONE]", report.StepsToReproduce);
+        Assert.DoesNotContain("5521977776666", report.ExpectedOrImpact);
+        Assert.Contains("[REDACTED_PHONE]", report.ExpectedOrImpact);
+    }
+
     [Theory]
     [InlineData("page", "2")]
     [InlineData("tab", "conv")]

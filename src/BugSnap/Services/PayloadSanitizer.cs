@@ -181,7 +181,10 @@ public static class PayloadSanitizer
                 var eqIndex = pair.IndexOf('=');
                 if (eqIndex < 0)
                 {
-                    modified.Add(pair);
+                    // A bare query token (no '=') has no key, so it can never match the safe
+                    // allowlist — redact it by default (e.g. ?5511999998888 / ?user@host).
+                    modified.Add("[REDACTED]");
+                    masked++;
                     continue;
                 }
 

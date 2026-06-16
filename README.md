@@ -134,7 +134,8 @@ BugSnap includes basic components if you don't need custom UI:
 | `Environment` | `null` | Environment name (Production, Staging, etc.) |
 | `MaxHttpEntries` | `20` | Max HTTP requests to keep in ring buffer |
 | `MaxJsErrors` | `10` | Max JS errors to keep in buffer |
-| `MaxErrorSnippetLength` | `500` | Max chars for HTTP error response snippets |
+| `MaxErrorSnippetLength` | `500` | Max chars for JS error/snippet truncation |
+| `MaxHttpErrorBodyLength` | `2000` | Max chars captured from an HTTP error response body (4xx/5xx) |
 | `RateLimitSeconds` | `30` | Min seconds between bug reports (prevents spam) |
 | `Destinations` | `[]` | List of destinations to send reports to |
 | `EnableConsoleDestination` | `false` | Log reports to browser console (dev/testing) |
@@ -339,7 +340,7 @@ Patterns are compiled regexes (case-insensitive). Invalid patterns are silently 
 | Browser / OS | `navigator.userAgent` |
 | Screen size | `window.innerWidth x innerHeight` |
 | Recent HTTP requests (last 20) | `HttpActivityTracker` DelegatingHandler |
-| HTTP error snippets (first 500 chars) | Response body on 4xx/5xx |
+| HTTP error snippets (first `MaxHttpErrorBodyLength` chars, default 2000) | Response body on 4xx/5xx |
 | Failed requests (network errors) | Exception type + message |
 | TraceId | `traceparent` or `X-Trace-Id` response header |
 | CorrelationId | `X-Correlation-Id` or `X-Request-Id` response header |
@@ -359,8 +360,8 @@ BugSnap sanitizes sensitive data **before** it leaves the browser. Not optional.
 | `Authorization: Basic xxx` | `Basic [REDACTED]` |
 | `Cookie: xxx` / `Set-Cookie: xxx` | `Cookie: [REDACTED]` |
 | `X-Api-Key: xxx` / `X-Token: xxx` | `X-Api-Key: [REDACTED]` |
-| `?token=xxx`, `?key=xxx`, `?api_key=xxx` | `?token=[REDACTED]` |
-| Error snippets | Truncated to 500 chars |
+| Query string values (**redact-by-default**) | Every query value masked to `[REDACTED]` EXCEPT a safe-key allowlist (`page`, `page_size`, `tab`, `id`, `limit`, `offset`, `status`, `sort`, `order`, `view`, `lang`, `cursor`). So `?email=`, `?cpf=`, `?q=...` and bare tokens (`?5511...`) are masked. |
+| Error snippets | Truncated to `MaxHttpErrorBodyLength` chars (default 2000) |
 
 ---
 

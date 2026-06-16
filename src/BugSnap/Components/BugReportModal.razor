@@ -108,7 +108,7 @@
                             </button>
                             @if (_technicalDetailsExpanded)
                             {
-                                <pre class="bs-preview-json">@BuildSanitizedPreviewJson()</pre>
+                                <pre class="bs-preview-json">@_previewJson</pre>
                             }
                         }
                     </div>
@@ -171,6 +171,7 @@
     private BugSnapCategory _selectedCategory = BugSnapCategory.Other;
 
     private bool _previewExpanded;
+    private string _previewJson = "{}"; // materialized when the technical panel is opened (avoids re-sanitizing on every keystroke)
     private bool _technicalDetailsExpanded;
     private bool _optionalFieldsExpanded;
 
@@ -180,10 +181,10 @@
     private bool _rateLimited;
     private int _rateLimitSecondsRemaining;
 
-    // Instance-scoped rate-limit gate. Was static, which made the manual modal share
-    // its cooldown with every other modal instance and the auto-capture path — an
-    // auto-report could silently block a user's first manual submit. Per-instance keeps
-    // the manual flow's rate limit independent of unrelated submissions.
+    // Instance-scoped rate-limit gate. Was static, which made every modal instance share one
+    // process-wide cooldown — an unrelated modal submit could silently block this user's first
+    // manual submit. (Auto-capture has its own AutoCaptureThrottle and never touched this field.)
+    // Per-instance keeps the manual flow's rate limit independent.
     private DateTime _lastSubmitTime = DateTime.MinValue;
 
     protected override async Task OnParametersSetAsync()
@@ -228,7 +229,13 @@
     }
 
     private void TogglePreview() => _previewExpanded = !_previewExpanded;
-    private void ToggleTechnicalDetails() => _technicalDetailsExpanded = !_technicalDetailsExpanded;
+    private void ToggleTechnicalDetails()
+    {
+        _technicalDetailsExpanded = !_technicalDetailsExpanded;
+        // Materialize the sanitized preview once on open (snapshot), not on every render/keystroke.
+        if (_technicalDetailsExpanded)
+            _previewJson = BuildSanitizedPreviewJson();
+    }
     private void ToggleOptionalFields() => _optionalFieldsExpanded = !_optionalFieldsExpanded;
 
     private async Task HandleSubmit()
