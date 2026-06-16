@@ -135,7 +135,8 @@ public class MultiDestinationDispatcherTests
         report.Context.RecentRequests = [entry];
 
         var dest = new FakeDestination();
-        var options = new BugSnapOptions { MaxErrorSnippetLength = 100 };
+        // HTTP error snippets are capped by MaxHttpErrorBodyLength (not MaxErrorSnippetLength).
+        var options = new BugSnapOptions { MaxHttpErrorBodyLength = 100 };
         var dispatcher = new MultiDestinationDispatcher([dest], options);
 
         // Act

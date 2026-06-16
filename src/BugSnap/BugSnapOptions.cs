@@ -16,8 +16,8 @@ public sealed class BugSnapOptions
     /// <summary>
     /// Maximum number of characters captured from an HTTP error response body
     /// into <c>HttpActivityEntry.ErrorSnippet</c> at capture time. The snippet is
-    /// further masked and may be truncated again by <see cref="MaxErrorSnippetLength"/>
-    /// during sanitization.
+    /// masked and truncated to this same MaxHttpErrorBodyLength during sanitization
+    /// (JS errors, console, breadcrumbs and user text use MaxErrorSnippetLength).
     /// </summary>
     public int MaxHttpErrorBodyLength { get; set; } = 2000;
 

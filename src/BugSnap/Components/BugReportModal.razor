@@ -439,6 +439,28 @@
             Column = e.Column,
             TimestampUtc = e.TimestampUtc,
             StackTrace = e.StackTrace
+        }).ToList(),
+        // B1 fields must be cloned too, otherwise the sanitized preview ("Ver detalhes
+        // tecnicos") omits memory/console/breadcrumb data that is actually sent --
+        // breaking the consent contract (preview must reflect the real payload).
+        Memory = source.Memory is null ? null : new MemoryInfo
+        {
+            JsHeapUsedBytes = source.Memory.JsHeapUsedBytes,
+            JsHeapTotalBytes = source.Memory.JsHeapTotalBytes,
+            JsHeapLimitBytes = source.Memory.JsHeapLimitBytes,
+            ManagedHeapBytes = source.Memory.ManagedHeapBytes
+        },
+        RecentConsoleErrors = source.RecentConsoleErrors.Select(c => new ConsoleErrorEntry
+        {
+            Message = c.Message,
+            Stack = c.Stack,
+            TimestampUtc = c.TimestampUtc
+        }).ToList(),
+        Breadcrumbs = source.Breadcrumbs.Select(b => new BreadcrumbEntry
+        {
+            Type = b.Type,
+            Detail = b.Detail,
+            TimestampUtc = b.TimestampUtc
         }).ToList()
     };
 }

@@ -48,7 +48,11 @@ public static class PayloadSanitizer
         foreach (var entry in report.Context.RecentRequests)
         {
             queryParamsMasked += MaskQueryParams(entry);
-            var (patternsMasked, truncated) = MaskAndTruncateSnippet(entry, options.MaxErrorSnippetLength);
+            // HTTP error bodies use the dedicated, larger cap (MaxHttpErrorBodyLength,
+            // default 2000) so the "bigger snippet" captured for 4xx/5xx survives to the
+            // payload — matching the README. JS/console/breadcrumb/user-text stay on the
+            // smaller MaxErrorSnippetLength (default 500).
+            var (patternsMasked, truncated) = MaskAndTruncateSnippet(entry, options.MaxHttpErrorBodyLength);
             headerPatternsMasked += patternsMasked;
             snippetsTruncated += truncated;
         }

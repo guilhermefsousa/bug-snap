@@ -66,6 +66,41 @@ public class BugReportModalTests : BunitContext
         RecentJsErrors = []
     };
 
+    // Context carrying the B1 fields: memory + a console error + a breadcrumb. Detail
+    // values are deliberately benign so they survive sanitization unchanged and can be
+    // asserted verbatim in the preview JSON.
+    private static BugContextSnapshot ContextWithB1Fields() => new()
+    {
+        CurrentRoute = "/dashboard",
+        RecentRequests = [],
+        RecentJsErrors = [],
+        Memory = new MemoryInfo
+        {
+            JsHeapUsedBytes = 123456,
+            JsHeapTotalBytes = 654321,
+            JsHeapLimitBytes = 999999,
+            ManagedHeapBytes = 42424242
+        },
+        RecentConsoleErrors =
+        [
+            new ConsoleErrorEntry
+            {
+                Message = "ConsoleBoomMarker",
+                Stack = "at doStuff (app.js:10)",
+                TimestampUtc = DateTime.UtcNow
+            }
+        ],
+        Breadcrumbs =
+        [
+            new BreadcrumbEntry
+            {
+                Type = "navigation",
+                Detail = "BreadcrumbRouteMarker",
+                TimestampUtc = DateTime.UtcNow
+            }
+        ]
+    };
+
     // --- Preview ---
 
     [Fact]
@@ -184,5 +219,36 @@ public class BugReportModalTests : BunitContext
         Assert.Equal(BugSnapCategory.API, report.Category);
         Assert.Equal("1. Cliquei em enviar 2. Nada aconteceu", report.StepsToReproduce);
         Assert.Equal("Esperava que a mensagem fosse enviada", report.ExpectedOrImpact);
+    }
+
+    // --- B1 fields must appear in the sanitized preview JSON (consent contract) ---
+
+    [Fact]
+    public void Modal_WhenTechnicalDetailsExpanded_PreviewJson_ShouldContainB1Fields()
+    {
+        // Regression guard: CloneContext used to drop Memory/RecentConsoleErrors/Breadcrumbs,
+        // so the preview ("Ver detalhes tecnicos") hid data that is actually sent. The preview
+        // must reflect the real (sanitized) payload — otherwise the user consents to less than
+        // what leaves the browser.
+        var (cut, _) = RenderModal(ContextWithB1Fields());
+
+        // Expand "O que sera enviado", then "Ver detalhes tecnicos".
+        cut.FindAll(".bs-collapse-toggle")
+            .First(b => b.TextContent.Contains("O que será enviado")).Click();
+        cut.FindAll(".bs-collapse-toggle")
+            .First(b => b.TextContent.Contains("Ver detalhes técnicos")).Click();
+
+        var json = cut.Find(".bs-preview-json").TextContent;
+
+        // camelCase property names from the serializer.
+        Assert.Contains("\"memory\"", json);
+        Assert.Contains("jsHeapUsedBytes", json);
+        Assert.Contains("managedHeapBytes", json);
+
+        Assert.Contains("recentConsoleErrors", json);
+        Assert.Contains("ConsoleBoomMarker", json);
+
+        Assert.Contains("breadcrumbs", json);
+        Assert.Contains("BreadcrumbRouteMarker", json);
     }
 }
