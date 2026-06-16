@@ -1,4 +1,5 @@
 using System.Net;
+using BugSnap;
 using BugSnap.Services;
 
 namespace BugSnap.Tests.Services;
@@ -14,10 +15,14 @@ public class HttpActivityTrackerTests
             => Task.FromResult(Response);
     }
 
-    private static (HttpClient client, HttpActivityBuffer buffer) BuildClient(int capacity, TestHandler inner)
+    private static (HttpClient client, HttpActivityBuffer buffer) BuildClient(
+        int capacity, TestHandler inner, BugSnapOptions? options = null)
     {
         var buffer = new HttpActivityBuffer(capacity);
-        var tracker = new HttpActivityTracker(buffer) { InnerHandler = inner };
+        var tracker = new HttpActivityTracker(buffer, options ?? new BugSnapOptions())
+        {
+            InnerHandler = inner
+        };
         return (new HttpClient(tracker), buffer);
     }
 
@@ -37,7 +42,7 @@ public class HttpActivityTrackerTests
         var entries = buffer.GetRecentActivity();
         Assert.Single(entries);
         Assert.Equal("GET", entries[0].Method);
-        Assert.Equal("https://example.com/api/users", entries[0].Url);
+        Assert.Equal("/api/users", entries[0].Url);
         Assert.Equal(200, entries[0].StatusCode);
     }
 
@@ -117,16 +122,37 @@ public class HttpActivityTrackerTests
         Assert.Null(entry.ErrorSnippet);
     }
 
-    // --- ErrorSnippet truncation ---
+    // --- ErrorSnippet body cap (configurable via BugSnapOptions.MaxHttpErrorBodyLength) ---
 
     [Fact]
-    public async Task SendAsync_WhenErrorBodyExceeds500Chars_ShouldTruncateErrorSnippetTo500()
+    public async Task SendAsync_WhenErrorBodyExceedsConfiguredCap_ShouldTruncateToCap()
     {
-        // Arrange
+        // Arrange — explicit small cap
         var longBody = new string('x', 800);
         var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
         {
             Content = new StringContent(longBody)
+        };
+        var inner = new TestHandler { Response = response };
+        var options = new BugSnapOptions { MaxHttpErrorBodyLength = 250 };
+        var (client, buffer) = BuildClient(10, inner, options);
+
+        // Act
+        await client.GetAsync("https://example.com/api/long-error");
+
+        // Assert
+        var entry = buffer.GetRecentActivity()[0];
+        Assert.Equal(250, entry.ErrorSnippet!.Length);
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenErrorBodyWithinDefaultCap_ShouldNotTruncate()
+    {
+        // Arrange — default cap is 2000; an 800-char body must survive intact
+        var body = new string('x', 800);
+        var response = new HttpResponseMessage(HttpStatusCode.BadRequest)
+        {
+            Content = new StringContent(body)
         };
         var inner = new TestHandler { Response = response };
         var (client, buffer) = BuildClient(10, inner);
@@ -136,7 +162,7 @@ public class HttpActivityTrackerTests
 
         // Assert
         var entry = buffer.GetRecentActivity()[0];
-        Assert.Equal(500, entry.ErrorSnippet!.Length);
+        Assert.Equal(800, entry.ErrorSnippet!.Length);
     }
 
     // --- TraceId extraction ---
@@ -247,10 +273,10 @@ public class HttpActivityTrackerTests
         Assert.Equal("preferred-corr", entry.CorrelationId);
     }
 
-    // --- URL is path-only (no query string) ---
+    // --- URL preserves path + query string (redacted later by PayloadSanitizer) ---
 
     [Fact]
-    public async Task SendAsync_WhenUrlHasQueryString_ShouldCapturePathOnly()
+    public async Task SendAsync_WhenUrlHasQueryString_ShouldCapturePathAndQuery()
     {
         // Arrange
         var inner = new TestHandler { Response = new HttpResponseMessage(HttpStatusCode.OK) };
@@ -259,10 +285,28 @@ public class HttpActivityTrackerTests
         // Act
         await client.GetAsync("https://example.com/api/search?q=secret&page=1");
 
+        // Assert — capture preserves PathAndQuery (not just the path).
+        // The query is redacted-by-default downstream by PayloadSanitizer, not here.
+        var entry = buffer.GetRecentActivity()[0];
+        Assert.Equal("/api/search?q=secret&page=1", entry.Url);
+        Assert.Contains("?", entry.Url);
+        Assert.Contains("page=1", entry.Url);
+    }
+
+    [Fact]
+    public async Task SendAsync_WhenUrlHasNoQueryString_ShouldCapturePathOnly()
+    {
+        // Arrange
+        var inner = new TestHandler { Response = new HttpResponseMessage(HttpStatusCode.OK) };
+        var (client, buffer) = BuildClient(10, inner);
+
+        // Act
+        await client.GetAsync("https://example.com/api/users/42");
+
         // Assert
         var entry = buffer.GetRecentActivity()[0];
-        Assert.Equal("https://example.com/api/search", entry.Url);
-        Assert.DoesNotContain("secret", entry.Url);
+        Assert.Equal("/api/users/42", entry.Url);
+        Assert.DoesNotContain("?", entry.Url);
     }
 
     // --- Ring buffer capacity ---
@@ -287,8 +331,8 @@ public class HttpActivityTrackerTests
         // Assert — only the last 3 are kept
         var entries = buffer.GetRecentActivity();
         Assert.Equal(3, entries.Count);
-        Assert.Equal("https://example.com/api/item/3", entries[0].Url);
-        Assert.Equal("https://example.com/api/item/4", entries[1].Url);
-        Assert.Equal("https://example.com/api/item/5", entries[2].Url);
+        Assert.Equal("/api/item/3", entries[0].Url);
+        Assert.Equal("/api/item/4", entries[1].Url);
+        Assert.Equal("/api/item/5", entries[2].Url);
     }
 }

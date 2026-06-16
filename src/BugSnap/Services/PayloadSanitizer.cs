@@ -5,8 +5,15 @@ namespace BugSnap.Services;
 
 public static class PayloadSanitizer
 {
-    private static readonly string[] _sensitiveQueryParams =
-        ["token", "key", "api_key", "access_token", "secret"];
+    // Redact-by-default: every query parameter value is masked EXCEPT these known-safe
+    // navigation/pagination keys. Inverting the old sensitive-allowlist closes a PII leak
+    // (?email= / ?cpf= / ?phone= / ?q=<name> would otherwise survive into the issue body
+    // now that the query string is preserved). Case-insensitive.
+    private static readonly HashSet<string> _safeQueryParams = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "page", "page_size", "tab", "id", "limit", "offset",
+        "status", "sort", "order", "view", "lang", "cursor"
+    };
 
     private static readonly Regex _bearerRegex =
         new(@"Bearer\s+\S+", RegexOptions.Compiled | RegexOptions.IgnoreCase);
@@ -161,14 +168,15 @@ public static class PayloadSanitizer
                 }
 
                 var paramName = pair[..eqIndex];
-                if (_sensitiveQueryParams.Contains(paramName, StringComparer.OrdinalIgnoreCase))
+                // Redact-by-default: keep only known-safe keys; mask everything else.
+                if (_safeQueryParams.Contains(paramName))
                 {
-                    modified.Add(paramName + "=[REDACTED]");
-                    masked++;
+                    modified.Add(pair);
                 }
                 else
                 {
-                    modified.Add(pair);
+                    modified.Add(paramName + "=[REDACTED]");
+                    masked++;
                 }
             }
 

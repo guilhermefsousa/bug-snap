@@ -13,6 +13,14 @@ public sealed class BugSnapOptions
     public int MaxErrorSnippetLength { get; set; } = 500;
     public int RateLimitSeconds { get; set; } = 30;
 
+    /// <summary>
+    /// Maximum number of characters captured from an HTTP error response body
+    /// into <c>HttpActivityEntry.ErrorSnippet</c> at capture time. The snippet is
+    /// further masked and may be truncated again by <see cref="MaxErrorSnippetLength"/>
+    /// during sanitization.
+    /// </summary>
+    public int MaxHttpErrorBodyLength { get; set; } = 2000;
+
     public List<IBugReportDestination> Destinations { get; set; } = [];
 
     /// <summary>
