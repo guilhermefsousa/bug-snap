@@ -302,4 +302,120 @@ public class PayloadSanitizerTests
         // Assert
         Assert.Equal(maxLength, jsError.StackTrace!.Length);
     }
+
+    // --- Console error sanitization ---
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorMessageContainsEmail_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "render failed for admin@corp.io while loading"
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED_EMAIL]", consoleError.Message);
+        Assert.DoesNotContain("admin@corp.io", consoleError.Message);
+    }
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorStackContainsBearer_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "fetch error",
+            Stack = "at fetch headers: Bearer eyJhbGciOiJIUzI1NiJ9.secret.sig\n at app.js:12"
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("Bearer [REDACTED]", consoleError.Stack);
+        Assert.DoesNotContain("eyJhbGciOiJIUzI1NiJ9.secret.sig", consoleError.Stack);
+    }
+
+    [Fact]
+    public void Sanitize_WhenConsoleErrorMessageExceedsMaxLength_ShouldTruncate()
+    {
+        // Arrange
+        var report = new BugReport();
+        var consoleError = new ConsoleErrorEntry
+        {
+            Message = "safe " + new string('y', 200)
+        };
+        report.Context.RecentConsoleErrors = [consoleError];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions(maxSnippetLength: 40));
+
+        // Assert
+        Assert.Equal(40, consoleError.Message.Length);
+    }
+
+    // --- Breadcrumb sanitization ---
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailContainsPhone_ShouldRedact()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry
+        {
+            Type = "navigation",
+            Detail = "/contacts/5511999998888/profile"
+        };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("[REDACTED_PHONE]", breadcrumb.Detail);
+        Assert.DoesNotContain("5511999998888", breadcrumb.Detail);
+    }
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailIsSafeRoute_ShouldLeaveUnchanged()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry
+        {
+            Type = "click",
+            Detail = "open-settings"
+        };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Equal("open-settings", breadcrumb.Detail);
+    }
+
+    [Fact]
+    public void Sanitize_WhenBreadcrumbDetailIsNull_ShouldNotThrow()
+    {
+        // Arrange
+        var report = new BugReport();
+        var breadcrumb = new BreadcrumbEntry { Type = "navigation", Detail = null };
+        report.Context.Breadcrumbs = [breadcrumb];
+
+        // Act
+        var ex = Record.Exception(() => PayloadSanitizer.Sanitize(report, DefaultOptions()));
+
+        // Assert
+        Assert.Null(ex);
+        Assert.Null(breadcrumb.Detail);
+    }
 }

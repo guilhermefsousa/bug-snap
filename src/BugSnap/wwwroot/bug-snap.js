@@ -4,6 +4,9 @@ window.__bugSnap = {
     _autoCaptureHelper: null,
     _consoleErrorRing: [],
     _consoleErrorMax: 5,
+    _breadcrumbRing: [],
+    _breadcrumbMax: 20,
+    _breadcrumbsPatched: false,
     _blazorUiFired: false,
     _blazorUiLastFireMs: 0,
     _blazorUiCooldownMs: 30000,
@@ -42,6 +45,7 @@ window.__bugSnap = {
         });
 
         self._patchConsoleError();
+        self._patchBreadcrumbs();
         self._observeBlazorErrorUi();
     },
 
@@ -109,6 +113,79 @@ window.__bugSnap = {
         };
     },
 
+    // PII-safe normalization: keep path only, drop query string and fragment.
+    _normalizePath(url) {
+        try {
+            const u = new URL(url, window.location.origin);
+            return u.pathname || '/';
+        } catch (_) {
+            // Fall back to manual split when URL parsing fails.
+            const s = String(url || '');
+            const q = s.indexOf('?');
+            const h = s.indexOf('#');
+            let end = s.length;
+            if (q >= 0) end = Math.min(end, q);
+            if (h >= 0) end = Math.min(end, h);
+            return s.slice(0, end) || '/';
+        }
+    },
+
+    _pushBreadcrumb(type, detail) {
+        this._breadcrumbRing.push({
+            type: type,
+            detail: detail,
+            timestamp: new Date().toISOString()
+        });
+        if (this._breadcrumbRing.length > this._breadcrumbMax) {
+            this._breadcrumbRing.shift();
+        }
+    },
+
+    _patchBreadcrumbs() {
+        if (this._breadcrumbsPatched) return;
+        this._breadcrumbsPatched = true;
+        const self = this;
+
+        // Patch history.pushState to capture SPA navigations (route only, no query).
+        if (window.history && typeof window.history.pushState === 'function') {
+            const originalPushState = window.history.pushState.bind(window.history);
+            window.history.pushState = function (state, title, url) {
+                try {
+                    const path = url != null
+                        ? self._normalizePath(url)
+                        : self._normalizePath(window.location.href);
+                    self._pushBreadcrumb('navigation', path);
+                } catch (_) {
+                    // never break navigation
+                }
+                return originalPushState(state, title, url);
+            };
+        }
+
+        // popstate (back/forward) — read current location only.
+        window.addEventListener('popstate', () => {
+            try {
+                self._pushBreadcrumb('navigation', self._normalizePath(window.location.href));
+            } catch (_) {
+                // never break navigation
+            }
+        });
+
+        // Click trail — ONLY elements carrying data-bugsnap-action.
+        // We record the attribute value, never text/content/DOM (Rule 1 / PII).
+        document.addEventListener('click', (e) => {
+            try {
+                const target = e.target;
+                if (!target || typeof target.closest !== 'function') return;
+                const el = target.closest('[data-bugsnap-action]');
+                if (!el) return;
+                self._pushBreadcrumb('click', el.getAttribute('data-bugsnap-action'));
+            } catch (_) {
+                // never break click handling
+            }
+        }, true);
+    },
+
     _observeBlazorErrorUi() {
         const self = this;
         const tryAttach = () => {
@@ -167,6 +244,23 @@ window.__bugSnap = {
     clearErrors() { this.errors = []; },
     getBrowserInfo() { return navigator.userAgent; },
     getScreenSize() { return window.innerWidth + 'x' + window.innerHeight; },
+
+    getConsoleErrors() { return [...this._consoleErrorRing]; },
+    getBreadcrumbs() { return [...this._breadcrumbRing]; },
+
+    // performance.memory is Chromium-only. Firefox/Safari do not expose it —
+    // return nulls in that case; NEVER fabricate values.
+    getMemoryInfo() {
+        const m = (typeof performance !== 'undefined') ? performance.memory : null;
+        if (!m) {
+            return { jsHeapUsedBytes: null, jsHeapTotalBytes: null, jsHeapLimitBytes: null };
+        }
+        return {
+            jsHeapUsedBytes: typeof m.usedJSHeapSize === 'number' ? m.usedJSHeapSize : null,
+            jsHeapTotalBytes: typeof m.totalJSHeapSize === 'number' ? m.totalJSHeapSize : null,
+            jsHeapLimitBytes: typeof m.jsHeapSizeLimit === 'number' ? m.jsHeapSizeLimit : null
+        };
+    },
 
     log(message) { console.log('%c[BugSnap]%c ' + message, 'color: #0F8B95; font-weight: bold', 'color: inherit'); },
 

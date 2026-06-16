@@ -52,6 +52,18 @@ public static class PayloadSanitizer
             SanitizeJsError(jsError, options.MaxErrorSnippetLength);
         }
 
+        // Sanitize console errors (message, stack)
+        foreach (var consoleError in report.Context.RecentConsoleErrors)
+        {
+            SanitizeConsoleError(consoleError, options.MaxErrorSnippetLength);
+        }
+
+        // Sanitize breadcrumb details (route / data-bugsnap-action value)
+        foreach (var breadcrumb in report.Context.Breadcrumbs)
+        {
+            SanitizeBreadcrumb(breadcrumb, options.MaxErrorSnippetLength);
+        }
+
         return new SanitizationResult(headerPatternsMasked, queryParamsMasked, snippetsTruncated);
     }
 
@@ -77,6 +89,36 @@ public static class PayloadSanitizer
         {
             int dummy = 0;
             entry.Source = RedactSensitive(entry.Source, ref dummy);
+        }
+    }
+
+    private static void SanitizeConsoleError(ConsoleErrorEntry entry, int maxLength)
+    {
+        if (!string.IsNullOrEmpty(entry.Message))
+        {
+            int dummy = 0;
+            entry.Message = RedactSensitive(entry.Message, ref dummy);
+            if (entry.Message.Length > maxLength)
+                entry.Message = entry.Message[..maxLength];
+        }
+
+        if (!string.IsNullOrEmpty(entry.Stack))
+        {
+            int dummy = 0;
+            entry.Stack = RedactSensitive(entry.Stack, ref dummy);
+            if (entry.Stack.Length > maxLength)
+                entry.Stack = entry.Stack[..maxLength];
+        }
+    }
+
+    private static void SanitizeBreadcrumb(BreadcrumbEntry entry, int maxLength)
+    {
+        if (!string.IsNullOrEmpty(entry.Detail))
+        {
+            int dummy = 0;
+            entry.Detail = RedactSensitive(entry.Detail, ref dummy);
+            if (entry.Detail.Length > maxLength)
+                entry.Detail = entry.Detail[..maxLength];
         }
     }
 

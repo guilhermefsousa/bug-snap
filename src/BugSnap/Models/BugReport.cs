@@ -2,7 +2,7 @@ namespace BugSnap.Models;
 
 public class BugReport
 {
-    public string SchemaVersion { get; set; } = "1.0.0";
+    public string SchemaVersion { get; set; } = "1.1.0";
     public string SdkVersion { get; set; } = "";
     public string Title { get; set; } = "";
     public string Description { get; set; } = "";

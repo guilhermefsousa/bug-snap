@@ -18,4 +18,7 @@ public class BugContextSnapshot
     public IReadOnlyList<JsErrorEntry> RecentJsErrors { get; set; } = [];
     public IDictionary<string, string> CustomContext { get; set; } = new Dictionary<string, string>();
     public BugSnapCategory? SuggestedCategory { get; set; }
+    public MemoryInfo? Memory { get; set; }
+    public IReadOnlyList<ConsoleErrorEntry> RecentConsoleErrors { get; set; } = [];
+    public IReadOnlyList<BreadcrumbEntry> Breadcrumbs { get; set; } = [];
 }
