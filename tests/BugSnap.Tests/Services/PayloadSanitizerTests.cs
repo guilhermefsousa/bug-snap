@@ -84,10 +84,10 @@ public class PayloadSanitizerTests
     }
 
     [Fact]
-    public void Sanitize_WhenUrlContainsOnlyNonSensitiveParams_ShouldLeaveUrlUnchanged()
+    public void Sanitize_WhenUrlContainsOnlySafeAllowlistParams_ShouldLeaveUrlUnchanged()
     {
-        // Arrange
-        const string originalUrl = "https://api.example.com/search?page=1&size=10&sort=asc";
+        // Arrange — all keys are in the safe allowlist
+        const string originalUrl = "https://api.example.com/search?page=1&page_size=10&sort=asc";
         var entry = EntryWithUrl(originalUrl);
         var report = ReportWith(entry);
 
@@ -111,6 +111,82 @@ public class PayloadSanitizerTests
 
         // Assert
         Assert.Equal(originalUrl, entry.Url);
+    }
+
+    // --- Redact-by-default: PII query params are masked (Rule 7) ---
+
+    [Theory]
+    [InlineData("email", "user@example.com")]
+    [InlineData("phone", "5511999998888")]
+    [InlineData("cpf", "12345678900")]
+    [InlineData("q", "Joao da Silva")]
+    public void Sanitize_WhenUrlContainsPiiQueryParam_ShouldRedactValue(string key, string value)
+    {
+        // Arrange — none of these keys are in the safe allowlist
+        var entry = EntryWithUrl($"https://api.example.com/data?{key}={Uri.EscapeDataString(value)}");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains($"{key}=[REDACTED]", entry.Url);
+        Assert.DoesNotContain(Uri.EscapeDataString(value), entry.Url);
+        Assert.DoesNotContain("Silva", entry.Url);
+        Assert.Equal(1, result.QueryParamsMasked);
+    }
+
+    [Theory]
+    [InlineData("page", "2")]
+    [InlineData("tab", "conv")]
+    [InlineData("id", "123")]
+    public void Sanitize_WhenUrlContainsSafeAllowlistParam_ShouldPreserveValue(string key, string value)
+    {
+        // Arrange — safe navigation/pagination keys are preserved
+        var entry = EntryWithUrl($"https://api.example.com/data?{key}={value}");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains($"{key}={value}", entry.Url);
+        Assert.DoesNotContain("[REDACTED]", entry.Url);
+        Assert.Equal(0, result.QueryParamsMasked);
+    }
+
+    [Fact]
+    public void Sanitize_WhenSafeKeyDiffersOnlyByCase_ShouldStillPreserve()
+    {
+        // Arrange — allowlist match is case-insensitive
+        var entry = EntryWithUrl("https://api.example.com/data?Page=3&TAB=inbox");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Equal("https://api.example.com/data?Page=3&TAB=inbox", entry.Url);
+        Assert.Equal(0, result.QueryParamsMasked);
+    }
+
+    [Fact]
+    public void Sanitize_WhenUrlMixesSafeAndUnknownParams_ShouldRedactOnlyUnknown()
+    {
+        // Arrange — page kept, email + name masked
+        var entry = EntryWithUrl("https://api.example.com/list?page=1&email=a@b.com&name=Maria");
+        var report = ReportWith(entry);
+
+        // Act
+        var result = PayloadSanitizer.Sanitize(report, DefaultOptions());
+
+        // Assert
+        Assert.Contains("page=1", entry.Url);
+        Assert.Contains("email=[REDACTED]", entry.Url);
+        Assert.Contains("name=[REDACTED]", entry.Url);
+        Assert.DoesNotContain("a@b.com", entry.Url);
+        Assert.DoesNotContain("Maria", entry.Url);
+        Assert.Equal(2, result.QueryParamsMasked);
     }
 
     // --- ErrorSnippet: Bearer/Basic masking ---
