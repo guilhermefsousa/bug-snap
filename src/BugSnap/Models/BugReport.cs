@@ -15,4 +15,21 @@ public class BugReport
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public string? Fingerprint { get; set; }
     public bool AutoDetected { get; set; } = false;
+
+    /// <summary>
+    /// Severity automatically detected from context, recorded even when the user
+    /// overrides <see cref="Severity"/>. Lets downstream consumers spot divergence
+    /// between heuristic and human assessment. Serialized enum name (e.g. "High").
+    /// </summary>
+    public string? AutoDetectedSeverity { get; set; }
+
+    /// <summary>
+    /// Optional, user-provided reproduction steps. Sanitized before any destination.
+    /// </summary>
+    public string? StepsToReproduce { get; set; }
+
+    /// <summary>
+    /// Optional, user-provided expected behavior / impact. Sanitized before any destination.
+    /// </summary>
+    public string? ExpectedOrImpact { get; set; }
 }

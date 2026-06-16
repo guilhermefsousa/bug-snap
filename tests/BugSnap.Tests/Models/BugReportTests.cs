@@ -12,7 +12,7 @@ public class BugReportTests
         // Arrange & Act
         var report = new BugReport();
 
-        // Assert
+        // Assert — bumped to 1.1.0 when memory/console/breadcrumb + StepsToReproduce/ExpectedOrImpact/AutoDetectedSeverity were added
         Assert.Equal("1.1.0", report.SchemaVersion);
     }
 
