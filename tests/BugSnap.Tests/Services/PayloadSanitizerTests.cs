@@ -261,20 +261,39 @@ public class PayloadSanitizerTests
     // --- ErrorSnippet truncation ---
 
     [Fact]
-    public void Sanitize_WhenErrorSnippetExceedsMaxLength_ShouldTruncate()
+    public void Sanitize_WhenErrorSnippetExceedsHttpBodyLength_ShouldTruncate()
     {
-        // Arrange
+        // Arrange — HTTP error snippets are capped by MaxHttpErrorBodyLength, NOT
+        // MaxErrorSnippetLength. The snippet is well above the HTTP cap here.
         var longSnippet = new string('a', 600);
         var entry = EntryWithUrl("https://example.com/api", errorSnippet: longSnippet);
         var report = ReportWith(entry);
-        var options = DefaultOptions(maxSnippetLength: 100);
+        var options = new BugSnapOptions { MaxHttpErrorBodyLength = 100, MaxErrorSnippetLength = 50 };
 
         // Act
         var result = PayloadSanitizer.Sanitize(report, options);
 
-        // Assert
+        // Assert — truncated to the HTTP cap (100), not the smaller MaxErrorSnippetLength (50)
         Assert.Equal(100, entry.ErrorSnippet!.Length);
         Assert.Equal(1, result.SnippetsTruncated);
+    }
+
+    [Fact]
+    public void Sanitize_WhenSnippetBetweenSnippetLengthAndHttpBodyLength_ShouldNotTruncate()
+    {
+        // Regression guard for the B2 fix: a 1000-char HTTP error body exceeds the
+        // 500-char MaxErrorSnippetLength but stays within the 2000-char MaxHttpErrorBodyLength,
+        // so it must survive to the payload intact (the "bigger snippet" the README promises).
+        var snippet = new string('b', 1000);
+        var entry = EntryWithUrl("https://example.com/api", errorSnippet: snippet);
+        var report = ReportWith(entry);
+
+        // Act — defaults: MaxErrorSnippetLength=500, MaxHttpErrorBodyLength=2000
+        var result = PayloadSanitizer.Sanitize(report, new BugSnapOptions());
+
+        // Assert — NOT truncated; full 1000 chars preserved
+        Assert.Equal(1000, entry.ErrorSnippet!.Length);
+        Assert.Equal(0, result.SnippetsTruncated);
     }
 
     [Fact]
@@ -302,7 +321,8 @@ public class PayloadSanitizerTests
         var entry1 = EntryWithUrl("https://example.com?token=abc", errorSnippet: new string('z', 600));
         var entry2 = EntryWithUrl("https://example.com?api_key=def", errorSnippet: null);
         var report = ReportWith(entry1, entry2);
-        var options = DefaultOptions(maxSnippetLength: 50);
+        // HTTP error snippets truncate on MaxHttpErrorBodyLength; 600 > 50 triggers truncation.
+        var options = new BugSnapOptions { MaxHttpErrorBodyLength = 50 };
 
         // Act
         var result = PayloadSanitizer.Sanitize(report, options);
